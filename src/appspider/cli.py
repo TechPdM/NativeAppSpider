@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
+import logging
+import sys
 from pathlib import Path
 
 import click
 
+from appspider.analyzer import check_api_key
 from appspider.crawler import CrawlConfig, Crawler
-from appspider.device import Device
+from appspider.device import ADBError, Device
 from appspider.reporter import generate_html_report
 
 
 @click.group()
-def main() -> None:
+@click.option("-v", "--verbose", is_flag=True, help="Enable debug logging")
+def main(verbose: bool) -> None:
     """AppSpider — automated mobile app UI crawler."""
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
 
 
 @main.command()
@@ -24,6 +32,7 @@ def main() -> None:
 @click.option("--output", default="output", help="Output directory")
 @click.option("--serial", default=None, help="ADB device serial (optional)")
 @click.option("--delay", default=1.5, type=float, help="Seconds to wait after each action")
+@click.option("--model", default=None, help="Claude model to use (e.g. claude-sonnet-4-5-20241022)")
 def crawl(
     package: str,
     max_screens: int,
@@ -32,11 +41,31 @@ def crawl(
     output: str,
     serial: str | None,
     delay: float,
+    model: str | None,
 ) -> None:
     """Crawl an app's UI and document all screens and flows.
 
     PACKAGE is the Android package name (e.g. com.example.app).
     """
+    # Validate prerequisites before starting
+    try:
+        check_api_key()
+    except RuntimeError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    device = Device(serial=serial)
+    if not device.is_connected():
+        click.echo("Error: No Android device connected. Start an emulator or connect a device.", err=True)
+        sys.exit(1)
+
+    try:
+        w, h = device.get_screen_size()
+        click.echo(f"Device connected ({w}x{h})")
+    except ADBError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
     config = CrawlConfig(
         package=package,
         max_screens=max_screens,
@@ -45,11 +74,17 @@ def crawl(
         output_dir=output,
         settle_delay=delay,
     )
-    device = Device(serial=serial)
-    crawler = Crawler(config, device)
 
-    click.echo(f"Starting crawl of {package}...")
-    state = crawler.crawl()
+    try:
+        crawler = Crawler(config, device, model=model)
+        click.echo(f"Starting crawl of {package}...")
+        state = crawler.crawl()
+    except ADBError as e:
+        click.echo(f"Device error: {e}", err=True)
+        sys.exit(1)
+    except RuntimeError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
     click.echo(f"\nDiscovered {len(state.screens)} screens")
     click.echo(f"Output: {state.output_dir}")
@@ -66,6 +101,12 @@ def report(crawl_dir: Path) -> None:
 
     CRAWL_DIR is the path to a crawl output directory.
     """
+    required_files = ["screens.json", "transitions.json", "flow.mmd"]
+    missing = [f for f in required_files if not (crawl_dir / f).exists()]
+    if missing:
+        click.echo(f"Error: Missing files in {crawl_dir}: {', '.join(missing)}", err=True)
+        sys.exit(1)
+
     report_path = generate_html_report(crawl_dir)
     click.echo(f"Report generated: {report_path}")
 

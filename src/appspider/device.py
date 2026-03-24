@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import io
+import logging
 import subprocess
-import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from pathlib import Path
 
 from PIL import Image
+
+logger = logging.getLogger(__name__)
+
+
+class ADBError(Exception):
+    """Raised when an ADB command fails."""
 
 
 @dataclass
@@ -37,8 +43,11 @@ class UIElement:
 
 def _parse_bounds(bounds_str: str) -> tuple[int, int, int, int]:
     """Parse '[x1,y1][x2,y2]' into (x1, y1, x2, y2)."""
-    parts = bounds_str.replace("][", ",").strip("[]").split(",")
-    return tuple(int(p) for p in parts)  # type: ignore[return-value]
+    try:
+        parts = bounds_str.replace("][", ",").strip("[]").split(",")
+        return tuple(int(p) for p in parts)  # type: ignore[return-value]
+    except (ValueError, IndexError):
+        return (0, 0, 0, 0)
 
 
 class Device:
@@ -49,24 +58,104 @@ class Device:
         self._adb_prefix = ["adb"]
         if serial:
             self._adb_prefix = ["adb", "-s", serial]
+        self._screen_size: tuple[int, int] | None = None
 
     def _run(self, *args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+        """Run an ADB command and return the result. Raises ADBError on failure."""
         cmd = [*self._adb_prefix, *args]
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            raise ADBError(f"ADB command timed out after {timeout}s: {' '.join(cmd)}") from e
+        except FileNotFoundError as e:
+            raise ADBError("ADB not found on PATH. Install Android SDK Platform Tools.") from e
+
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            raise ADBError(f"ADB command failed (exit {result.returncode}): {' '.join(cmd)}\n{stderr}")
+
+        return result
+
+    def _run_binary(self, *args: str, timeout: int = 30) -> bytes:
+        """Run an ADB command and return raw binary stdout."""
+        cmd = [*self._adb_prefix, *args]
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            raise ADBError(f"ADB command timed out after {timeout}s: {' '.join(cmd)}") from e
+        except FileNotFoundError as e:
+            raise ADBError("ADB not found on PATH. Install Android SDK Platform Tools.") from e
+
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace").strip()
+            raise ADBError(f"ADB command failed (exit {result.returncode}): {' '.join(cmd)}\n{stderr}")
+
+        return result.stdout
+
+    def is_connected(self) -> bool:
+        """Check if a device is connected and accessible."""
+        try:
+            result = self._run("devices")
+        except ADBError:
+            return False
+
+        lines = result.stdout.strip().splitlines()
+        for line in lines[1:]:  # Skip header
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "device":
+                if self._serial is None or parts[0] == self._serial:
+                    return True
+        return False
+
+    def get_screen_size(self) -> tuple[int, int]:
+        """Get the device screen size in pixels (width, height). Cached after first call.
+
+        Prefers the 'Override size' if set (e.g. via `adb shell wm size 1080x1920`),
+        falls back to 'Physical size'.
+        """
+        if self._screen_size is not None:
+            return self._screen_size
+
+        result = self._run("shell", "wm", "size")
+        # Output may contain:
+        #   Physical size: 320x640
+        #   Override size: 1080x1920
+        # Prefer override when present.
+        physical: tuple[int, int] | None = None
+        for line in result.stdout.strip().splitlines():
+            if ":" not in line or "x" not in line:
+                continue
+            label, size_str = line.split(":", 1)
+            size_str = size_str.strip()
+            try:
+                w, h = size_str.split("x")
+                parsed = (int(w), int(h))
+            except (ValueError, IndexError):
+                continue
+
+            if "override" in label.lower():
+                self._screen_size = parsed
+                return self._screen_size
+            if physical is None:
+                physical = parsed
+
+        if physical:
+            self._screen_size = physical
+            return self._screen_size
+
+        raise ADBError(f"Could not parse screen size from: {result.stdout.strip()}")
 
     def screenshot(self) -> Image.Image:
         """Capture a screenshot and return as PIL Image."""
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            tmp = f.name
-        self._run("exec-out", "screencap", "-p", timeout=10)
-        # Use exec-out for binary data
-        result = subprocess.run(
-            [*self._adb_prefix, "exec-out", "screencap", "-p"],
-            capture_output=True,
-            timeout=10,
-        )
-        Path(tmp).write_bytes(result.stdout)
-        return Image.open(tmp)
+        data = self._run_binary("exec-out", "screencap", "-p", timeout=10)
+
+        if len(data) < 100:
+            raise ADBError(f"Screenshot too small ({len(data)} bytes) — likely corrupt or empty")
+
+        try:
+            return Image.open(io.BytesIO(data))
+        except Exception as e:
+            raise ADBError(f"Failed to decode screenshot ({len(data)} bytes): {e}") from e
 
     def tap(self, x: int, y: int) -> None:
         """Tap at coordinates."""
@@ -91,27 +180,77 @@ class Device:
 
     def current_activity(self) -> str:
         """Get the current foreground activity name."""
-        result = self._run("shell", "dumpsys", "activity", "activities")
+        try:
+            result = self._run("shell", "dumpsys", "activity", "activities")
+        except ADBError:
+            return "unknown"
+
         for line in result.stdout.splitlines():
             if "mResumedActivity" in line or "mFocusedActivity" in line:
-                # Extract activity name from the line
                 parts = line.strip().split()
                 for part in parts:
                     if "/" in part and "." in part:
                         return part.rstrip("}")
         return "unknown"
 
+    def is_package_installed(self, package: str) -> bool:
+        """Check if a package is installed on the device."""
+        result = self._run("shell", "pm", "list", "packages", package)
+        return f"package:{package}" in result.stdout
+
     def launch_app(self, package: str) -> None:
-        """Launch an app by package name using monkey."""
-        self._run(
-            "shell", "monkey", "-p", package,
-            "-c", "android.intent.category.LAUNCHER", "1",
-        )
+        """Launch an app by package name.
+
+        Uses `am start` with the launcher intent. Falls back to `monkey` if
+        the main activity can't be resolved.
+        """
+        if not self.is_package_installed(package):
+            raise ADBError(f"Package not installed: {package}")
+        try:
+            self._run(
+                "shell", "am", "start",
+                "-a", "android.intent.action.MAIN",
+                "-c", "android.intent.category.LAUNCHER",
+                "-n", self._resolve_main_activity(package),
+            )
+        except ADBError:
+            # Fallback: monkey command (exit code is unreliable, so use _run_lenient)
+            self._run_lenient(
+                "shell", "monkey", "-p", package,
+                "-c", "android.intent.category.LAUNCHER", "1",
+            )
+
+    def _resolve_main_activity(self, package: str) -> str:
+        """Find the main launcher activity for a package."""
+        result = self._run("shell", "cmd", "package", "resolve-activity",
+                           "--brief", "-a", "android.intent.action.MAIN",
+                           "-c", "android.intent.category.LAUNCHER", package)
+        lines = result.stdout.strip().splitlines()
+        for line in reversed(lines):
+            line = line.strip()
+            if "/" in line and "." in line:
+                return line
+        raise ADBError(f"Could not resolve main activity for {package}")
+
+    def _run_lenient(self, *args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+        """Run an ADB command, ignoring non-zero exit codes."""
+        cmd = [*self._adb_prefix, *args]
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            raise ADBError(f"ADB command timed out after {timeout}s: {' '.join(cmd)}") from e
+        except FileNotFoundError as e:
+            raise ADBError("ADB not found on PATH.") from e
 
     def get_ui_hierarchy(self) -> list[UIElement]:
         """Dump and parse the UI hierarchy."""
-        self._run("shell", "uiautomator", "dump", "/sdcard/ui_dump.xml")
-        result = self._run("shell", "cat", "/sdcard/ui_dump.xml")
+        try:
+            self._run("shell", "uiautomator", "dump", "/sdcard/ui_dump.xml")
+            result = self._run("shell", "cat", "/sdcard/ui_dump.xml")
+        except ADBError as e:
+            logger.warning("UI hierarchy dump failed: %s", e)
+            return []
+
         if not result.stdout.strip():
             return []
         return self._parse_hierarchy(result.stdout)

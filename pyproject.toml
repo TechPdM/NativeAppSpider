@@ -12,6 +12,9 @@ dependencies = [
     "imagehash>=4.3",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock", "ruff"]
+
 [project.scripts]
 appspider = "appspider.cli:main"
 
@@ -28,3 +31,6 @@ line-length = 100
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "e2e: requires live device and API key (deselect with '-m not e2e')",
+]

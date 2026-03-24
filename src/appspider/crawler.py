@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -12,8 +13,10 @@ import networkx as nx
 from PIL import Image
 
 from appspider.analyzer import Analyzer, NavigationAction, ScreenAnalysis
-from appspider.device import Device
+from appspider.device import ADBError, Device
 from appspider.hasher import are_similar, screen_hash
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,14 +67,21 @@ class CrawlState:
 class Crawler:
     """Orchestrates the app crawling process."""
 
-    def __init__(self, config: CrawlConfig, device: Device | None = None):
+    def __init__(self, config: CrawlConfig, device: Device | None = None, model: str | None = None):
         self.config = config
         self.device = device or Device()
-        self.analyzer = Analyzer()
+        self.analyzer = Analyzer(model=model) if model else Analyzer()
         self.state = CrawlState()
 
     def crawl(self) -> CrawlState:
         """Run the main crawl loop."""
+        # Validate prerequisites
+        if not self.device.is_connected():
+            raise RuntimeError("No Android device connected. Start an emulator or connect a device.")
+
+        screen_w, screen_h = self.device.get_screen_size()
+        logger.info("Device screen: %dx%d", screen_w, screen_h)
+
         # Set up output directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.state.output_dir = Path(self.config.output_dir) / f"{self.config.package}_{timestamp}"
@@ -85,101 +95,62 @@ class Crawler:
 
         # Main crawl loop
         consecutive_known = 0
+        prev_screen: str | None = None
+        prev_action: NavigationAction | None = None
+
         while (
             self.state.action_count < self.config.max_actions
             and len(self.state.screens) < self.config.max_screens
         ):
-            # Capture current state
-            screenshot = self.device.screenshot()
-            current_hash = screen_hash(screenshot)
+            try:
+                screenshot, screen_id, is_new = self._capture_and_identify()
+            except ADBError as e:
+                logger.error("Screenshot failed: %s", e)
+                time.sleep(self.config.settle_delay)
+                continue
 
-            # Check if we've seen this screen
-            existing = self.state.find_matching_screen(current_hash, self.config.hash_threshold)
-            if existing:
-                screen_id = existing
+            if is_new:
+                consecutive_known = 0
+                try:
+                    self._process_new_screen(screenshot, screen_id)
+                except Exception as e:
+                    logger.error("Failed to analyze screen: %s", e)
+                    self._record_minimal_screen(screenshot, screen_id)
+            else:
                 self.state.screens[screen_id].visit_count += 1
                 consecutive_known += 1
                 print(f"  [revisit] {self.state.screens[screen_id].screen_name} "
                       f"(visited {self.state.screens[screen_id].visit_count}x)")
-            else:
-                screen_id = current_hash
-                consecutive_known = 0
 
-                # New screen — analyze it
-                clickable = self.device.get_clickable_elements()
-                ui_elements = [
-                    {"label": e.label, "bounds": e.bounds, "class": e.class_name}
-                    for e in clickable
-                ]
-
-                print(f"  [NEW] Analyzing screen ({len(self.state.screens) + 1})...")
-                analysis = self.analyzer.analyze_screen(
-                    screenshot,
-                    ui_elements=ui_elements,
-                    visited_screens=[s.screen_name for s in self.state.screens.values()],
-                    current_path=self.state.current_path,
+            # Record transition from previous action (now that current screen is identified)
+            if prev_screen is not None and prev_action is not None and screen_id != prev_screen:
+                self.state.graph.add_edge(
+                    prev_screen, screen_id,
+                    action=prev_action.action,
+                    reason=prev_action.reason,
                 )
-
-                # Save screenshot
-                ss_path = self.state.output_dir / "screenshots" / f"{screen_id[:16]}.png"
-                screenshot.save(ss_path)
-
-                # Record the screen
-                node = ScreenNode(
-                    screen_id=screen_id,
-                    screen_name=analysis.screen_name,
-                    description=analysis.description,
-                    activity=self.device.current_activity(),
-                    elements=analysis.elements,
-                    screenshot_path=str(ss_path),
-                    visit_count=1,
-                    first_seen=datetime.now().isoformat(),
-                )
-                self.state.screens[screen_id] = node
-                self.state.graph.add_node(screen_id, name=analysis.screen_name)
-                print(f"         → {analysis.screen_name}: {analysis.description[:80]}")
 
             # Update path
             if screen_id not in self.state.current_path:
                 self.state.current_path.append(screen_id)
 
             # Decide what to do next
-            if consecutive_known > 5:
-                # Stuck in a loop — backtrack
-                action = NavigationAction(action="back", reason="stuck in loop")
-                consecutive_known = 0
-            elif len(self.state.current_path) > self.config.max_depth:
-                action = NavigationAction(action="back", reason="max depth reached")
-            else:
-                clickable = self.device.get_clickable_elements()
-                elements_for_ai = [
-                    {"label": e.label, "center": e.center, "class": e.class_name}
-                    for e in clickable
-                ]
-                action = self.analyzer.decide_next_action(
-                    screenshot,
-                    elements_for_ai,
-                    [s.screen_name for s in self.state.screens.values()],
-                )
+            action = self._decide_action(
+                screenshot, screen_id, consecutive_known, screen_w, screen_h,
+            )
 
             # Execute the action
             prev_screen = screen_id
-            self._execute_action(action)
+            prev_action = action
+            try:
+                self._execute_action(action, screen_w, screen_h)
+            except ADBError as e:
+                logger.error("Action failed: %s", e)
+
             self.state.action_count += 1
             print(f"  [{self.state.action_count}] {action.action} → {action.reason}")
 
             time.sleep(self.config.settle_delay)
-
-            # After action, check what screen we're on for edge recording
-            post_screenshot = self.device.screenshot()
-            post_hash = screen_hash(post_screenshot)
-            post_screen = self.state.find_matching_screen(post_hash, self.config.hash_threshold)
-            if post_screen and post_screen != prev_screen:
-                self.state.graph.add_edge(
-                    prev_screen, post_screen,
-                    action=action.action,
-                    reason=action.reason,
-                )
 
             if action.action == "back" and self.state.current_path:
                 self.state.current_path.pop()
@@ -190,17 +161,103 @@ class Crawler:
               f"{self.state.action_count} actions")
         return self.state
 
-    def _execute_action(self, action: NavigationAction) -> None:
+    def _capture_and_identify(self) -> tuple[Image.Image, str, bool]:
+        """Capture screenshot, hash it, return (image, screen_id, is_new)."""
+        screenshot = self.device.screenshot()
+        current_hash = screen_hash(screenshot)
+
+        existing = self.state.find_matching_screen(current_hash, self.config.hash_threshold)
+        if existing:
+            return screenshot, existing, False
+        return screenshot, current_hash, True
+
+    def _process_new_screen(self, screenshot: Image.Image, screen_id: str) -> None:
+        """Analyze and record a new screen."""
+        clickable = self.device.get_clickable_elements()
+        ui_elements = [
+            {"label": e.label, "bounds": e.bounds, "class": e.class_name}
+            for e in clickable
+        ]
+
+        print(f"  [NEW] Analyzing screen ({len(self.state.screens) + 1})...")
+        analysis = self.analyzer.analyze_screen(
+            screenshot,
+            ui_elements=ui_elements,
+            visited_screens=[s.screen_name for s in self.state.screens.values()],
+            current_path=self.state.current_path,
+        )
+
+        self._record_screen(screenshot, screen_id, analysis)
+        print(f"         → {analysis.screen_name}: {analysis.description[:80]}")
+
+    def _record_screen(
+        self, screenshot: Image.Image, screen_id: str, analysis: ScreenAnalysis,
+    ) -> None:
+        """Save a screen to the state graph and disk."""
+        ss_path = self.state.output_dir / "screenshots" / f"{screen_id[:16]}.png"
+        screenshot.save(ss_path)
+
+        node = ScreenNode(
+            screen_id=screen_id,
+            screen_name=analysis.screen_name,
+            description=analysis.description,
+            activity=self.device.current_activity(),
+            elements=analysis.elements,
+            screenshot_path=str(ss_path),
+            visit_count=1,
+            first_seen=datetime.now().isoformat(),
+        )
+        self.state.screens[screen_id] = node
+        self.state.graph.add_node(screen_id, name=analysis.screen_name)
+
+    def _record_minimal_screen(self, screenshot: Image.Image, screen_id: str) -> None:
+        """Record a screen with minimal info when analysis fails."""
+        analysis = ScreenAnalysis(
+            screen_name=f"screen_{len(self.state.screens) + 1}",
+            description="Analysis failed",
+            elements=[],
+            suggested_actions=[],
+        )
+        self._record_screen(screenshot, screen_id, analysis)
+
+    def _decide_action(
+        self,
+        screenshot: Image.Image,
+        screen_id: str,
+        consecutive_known: int,
+        screen_w: int,
+        screen_h: int,
+    ) -> NavigationAction:
+        """Decide the next navigation action."""
+        if consecutive_known > 5:
+            return NavigationAction(action="back", reason="stuck in loop")
+        if len(self.state.current_path) > self.config.max_depth:
+            return NavigationAction(action="back", reason="max depth reached")
+
+        try:
+            clickable = self.device.get_clickable_elements()
+            elements_for_ai = [
+                {"label": e.label, "center": e.center, "class": e.class_name}
+                for e in clickable
+            ]
+            return self.analyzer.decide_next_action(
+                screenshot,
+                elements_for_ai,
+                [s.screen_name for s in self.state.screens.values()],
+            )
+        except Exception as e:
+            logger.error("Navigation decision failed: %s", e)
+            return NavigationAction(action="back", reason=f"decision error: {e}")
+
+    def _execute_action(self, action: NavigationAction, screen_w: int, screen_h: int) -> None:
         """Execute a navigation action on the device."""
         match action.action:
             case "tap":
                 self.device.tap(action.x, action.y)
             case "swipe_up":
-                w, h = 540, 1920  # Approximate, could query device
-                self.device.swipe(w // 2, h * 3 // 4, w // 2, h // 4)
+                self.device.swipe(screen_w // 2, screen_h * 3 // 4, screen_w // 2, screen_h // 4)
             case "swipe_down":
-                w, h = 540, 1920
-                self.device.swipe(w // 2, h // 4, w // 2, h * 3 // 4)
+                self.device.swipe(screen_w // 2, screen_h // 4, screen_w // 2, screen_h * 3 // 4)
             case "back":
                 self.device.press_back()
             case "type":
@@ -208,8 +265,27 @@ class Crawler:
             case _:
                 self.device.press_back()
 
+    def _deduplicate_screen_names(self) -> None:
+        """Append numeric suffixes to duplicate screen names."""
+        name_counts: dict[str, int] = {}
+        for node in self.state.screens.values():
+            name_counts[node.screen_name] = name_counts.get(node.screen_name, 0) + 1
+
+        # Only rename if there are actual duplicates
+        dupes = {name for name, count in name_counts.items() if count > 1}
+        if not dupes:
+            return
+
+        dupe_index: dict[str, int] = {}
+        for node in self.state.screens.values():
+            if node.screen_name in dupes:
+                idx = dupe_index.get(node.screen_name, 1)
+                dupe_index[node.screen_name] = idx + 1
+                node.screen_name = f"{node.screen_name} ({idx})"
+
     def _save_results(self) -> None:
         """Save crawl state to JSON and Mermaid diagram."""
+        self._deduplicate_screen_names()
         out = self.state.output_dir
 
         # Save screen data

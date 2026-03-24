@@ -1,14 +1,22 @@
-"""Claude Computer Use integration for screen analysis and navigation decisions."""
+"""Claude vision API integration for screen analysis and navigation decisions."""
 
 from __future__ import annotations
 
 import base64
 import io
 import json
+import logging
+import os
+import time
 from dataclasses import dataclass
 
 import anthropic
 from PIL import Image
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 2.0  # seconds
 
 
 @dataclass
@@ -32,16 +40,55 @@ class NavigationAction:
     reason: str = ""
 
 
+def check_api_key() -> None:
+    """Verify ANTHROPIC_API_KEY is set. Call before starting a crawl."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY environment variable is not set.\n"
+            "Set it with: export ANTHROPIC_API_KEY=your-key"
+        )
+
+
 def _image_to_base64(image: Image.Image) -> str:
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     return base64.standard_b64encode(buf.getvalue()).decode()
 
 
+def _parse_json_response(text: str) -> dict:
+    """Parse JSON from Claude's response, handling markdown fences."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+    return json.loads(text)
+
+
+def _call_with_retry(client: anthropic.Anthropic, **kwargs) -> anthropic.types.Message:
+    """Call the Claude API with exponential backoff on retryable errors."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            return client.messages.create(**kwargs)
+        except anthropic.RateLimitError:
+            if attempt == MAX_RETRIES - 1:
+                raise
+            delay = RETRY_BASE_DELAY * (2 ** attempt)
+            logger.warning("Rate limited, retrying in %.1fs (attempt %d/%d)", delay, attempt + 1, MAX_RETRIES)
+            time.sleep(delay)
+        except anthropic.APIStatusError as e:
+            if e.status_code >= 500 and attempt < MAX_RETRIES - 1:
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning("API error %d, retrying in %.1fs", e.status_code, delay)
+                time.sleep(delay)
+            else:
+                raise
+    raise RuntimeError("Unreachable")  # pragma: no cover
+
+
 class Analyzer:
     """Uses Claude to analyze screens and decide navigation."""
 
-    def __init__(self, model: str = "claude-sonnet-4-6-20250514"):
+    def __init__(self, model: str = "claude-sonnet-4-6"):
+        check_api_key()
         self._client = anthropic.Anthropic()
         self._model = model
 
@@ -65,7 +112,8 @@ class Analyzer:
 
         context = "\n\n".join(context_parts)
 
-        response = self._client.messages.create(
+        response = _call_with_retry(
+            self._client,
             model=self._model,
             max_tokens=2000,
             messages=[{
@@ -104,26 +152,27 @@ Return ONLY valid JSON, no markdown fences.""",
             }],
         )
 
-        text = response.content[0].text.strip()
-        # Strip markdown fences if present
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        return self._parse_screen_analysis(response.content[0].text)
 
+    @staticmethod
+    def _parse_screen_analysis(text: str) -> ScreenAnalysis:
+        """Parse Claude's response into a ScreenAnalysis, with fallbacks."""
         try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            data = {
-                "screen_name": "parse_error",
-                "description": text[:200],
-                "elements": [],
-                "suggested_actions": [],
-            }
+            data = _parse_json_response(text)
+        except (json.JSONDecodeError, IndexError):
+            logger.warning("Failed to parse screen analysis JSON, using fallback")
+            return ScreenAnalysis(
+                screen_name="parse_error",
+                description=text[:200],
+                elements=[],
+                suggested_actions=[],
+            )
 
         return ScreenAnalysis(
-            screen_name=data.get("screen_name", "unknown"),
-            description=data.get("description", ""),
-            elements=data.get("elements", []),
-            suggested_actions=data.get("suggested_actions", []),
+            screen_name=data.get("screen_name", "unknown") or "unknown",
+            description=data.get("description", "") or "",
+            elements=data.get("elements") if isinstance(data.get("elements"), list) else [],
+            suggested_actions=data.get("suggested_actions") if isinstance(data.get("suggested_actions"), list) else [],
         )
 
     def decide_next_action(
@@ -134,7 +183,8 @@ Return ONLY valid JSON, no markdown fences.""",
         exploration_goal: str = "Explore as many unique screens as possible",
     ) -> NavigationAction:
         """Decide which action to take next to maximize exploration coverage."""
-        response = self._client.messages.create(
+        response = _call_with_retry(
+            self._client,
             model=self._model,
             max_tokens=500,
             messages=[{
@@ -169,19 +219,26 @@ Return ONLY valid JSON.""",
             }],
         )
 
-        text = response.content[0].text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        return self._parse_navigation_action(response.content[0].text)
 
+    @staticmethod
+    def _parse_navigation_action(text: str) -> NavigationAction:
+        """Parse Claude's response into a NavigationAction, with fallbacks."""
         try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
+            data = _parse_json_response(text)
+        except (json.JSONDecodeError, IndexError):
+            logger.warning("Failed to parse navigation action JSON, falling back to 'back'")
             return NavigationAction(action="back", reason="failed to parse AI response")
 
+        action = data.get("action", "back")
+        if action not in ("tap", "swipe_up", "swipe_down", "back", "type"):
+            logger.warning("Unknown action '%s', falling back to 'back'", action)
+            action = "back"
+
         return NavigationAction(
-            action=data.get("action", "back"),
-            x=data.get("x", 0),
-            y=data.get("y", 0),
-            text=data.get("text", ""),
-            reason=data.get("reason", ""),
+            action=action,
+            x=int(data.get("x", 0) or 0),
+            y=int(data.get("y", 0) or 0),
+            text=str(data.get("text", "") or ""),
+            reason=str(data.get("reason", "") or ""),
         )

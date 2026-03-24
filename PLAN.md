@@ -2,19 +2,19 @@
 
 ## Current Status
 
-The project has a complete architectural scaffold — all modules exist, imports resolve, the CLI runs, and the crawl loop logic is coherent. It has never been executed against a real device. Several issues would cause immediate failures on first run.
+All code fixes and unit tests from Phase 1 are complete. The codebase is ready for real-device testing. Next step: set up an Android emulator and run the first crawl.
 
 | Component | Status | Notes |
 |---|---|---|
 | Project structure | Done | `pyproject.toml`, package layout, CLI entry point |
 | Architecture docs | Done | `ARCHITECTURE.md`, `CLAUDE.md` |
-| CLI (`cli.py`) | Done | `crawl` and `report` commands with Click |
-| Device interface (`device.py`) | Partial | All methods exist but no error handling, screenshot has a duplicate ADB call bug |
+| CLI (`cli.py`) | Done | Startup validation (API key, device connectivity, screen size), verbose flag |
+| Device interface (`device.py`) | Done | `ADBError` exceptions, return code checking, `is_connected()`, `get_screen_size()`, `is_package_installed()`, in-memory screenshots |
 | Perceptual hasher (`hasher.py`) | Done | Average hash + similarity check |
-| Screen analyzer (`analyzer.py`) | Partial | Prompts and JSON parsing work, no API key validation or retry logic |
-| Crawl loop (`crawler.py`) | Partial | Core loop and state graph work, no error recovery, hardcoded device dimensions |
+| Screen analyzer (`analyzer.py`) | Done | API key validation, retry with backoff, response structure validation, unknown action fallback |
+| Crawl loop (`crawler.py`) | Done | Per-step error recovery, real device dimensions for swipes, app launch verification |
 | Reporter (`reporter.py`) | Done | HTML generation with Mermaid, self-contained output |
-| Tests | Not started | Empty `tests/` directory |
+| Tests | Done | 71 unit tests, all passing (1.8s), fully mocked |
 
 ---
 
@@ -23,17 +23,17 @@ The project has a complete architectural scaffold — all modules exist, imports
 **Goal:** Fix known bugs, add minimum error handling, and complete a real crawl against an Android emulator.
 
 **Bug fixes:**
-- [ ] Fix `screenshot()` — remove duplicate ADB call, add temp file cleanup, validate captured image
-- [ ] Add return code checking in `_run()` — raise clear exceptions on ADB failures
-- [ ] Detect device dimensions via `adb shell wm size` — replace hardcoded 540x1920
+- [x] Fix `screenshot()` — removed duplicate ADB call, reads into memory via `io.BytesIO`, validates image size
+- [x] Add return code checking in `_run()` — raises `ADBError` on non-zero exit, timeout, or missing ADB
+- [x] Detect device dimensions via `adb shell wm size` — cached, used for swipe coordinates
 
 **Validation & error handling:**
-- [ ] Check device connectivity before crawl starts (`adb devices`)
-- [ ] Check `ANTHROPIC_API_KEY` is set at CLI startup
-- [ ] Verify target app package exists and launched
-- [ ] Wrap crawl loop steps in try/except — log errors per-step, don't crash the whole crawl
-- [ ] Add API retry with exponential backoff for rate limits and timeouts
-- [ ] Validate AI response structure — handle missing fields, default missing x/y to fallback
+- [x] Check device connectivity before crawl starts (`adb devices`)
+- [x] Check `ANTHROPIC_API_KEY` is set at CLI startup
+- [x] Verify target app package exists and launched
+- [x] Wrap crawl loop steps in try/except — log errors per-step, don't crash the whole crawl
+- [x] Add API retry with exponential backoff for rate limits and timeouts
+- [x] Validate AI response structure — handle missing fields, default missing x/y to fallback
 
 **First real crawls:**
 - [ ] Set up Android emulator, document setup steps
@@ -43,12 +43,12 @@ The project has a complete architectural scaffold — all modules exist, imports
 - [ ] Tune hash threshold and settle delay based on real results
 - [ ] Review and improve AI prompts based on real Claude responses
 
-**Unit tests** (written alongside bug fixes, all mocked, no device/API needed):
-- [ ] `test_hasher.py` — hash consistency, similarity detection, threshold boundaries
-- [ ] `test_device.py` — mock subprocess, test XML parsing, error raising on ADB failures
-- [ ] `test_analyzer.py` — mock Claude API, test JSON parsing, fallback on malformed responses
-- [ ] `test_crawler.py` — mock device + analyzer, test loop termination, backtracking, edge recording
-- [ ] `test_reporter.py` — generate reports from fixture data, verify HTML structure
+**Unit tests** (71 tests, all passing in ~1.8s, fully mocked):
+- [x] `test_hasher.py` — hash consistency, similarity detection, threshold boundaries (8 tests)
+- [x] `test_device.py` — mock subprocess, XML parsing, error raising, connectivity, screenshots (21 tests)
+- [x] `test_analyzer.py` — JSON parsing, fence stripping, malformed response fallback, null handling (18 tests)
+- [x] `test_crawler.py` — loop termination, backtracking, graph edges, error recovery (10 tests)
+- [x] `test_reporter.py` — HTML generation, screenshot embedding, missing file handling (6 tests)
 
 ### Phase 1 Validation Checklist
 
