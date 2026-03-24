@@ -44,6 +44,7 @@ class CrawlConfig:
     settle_delay: float = 1.5  # seconds to wait after each action
     output_dir: str = "output"
     hash_threshold: int = 12
+    avoid_flows: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -236,6 +237,7 @@ class Crawler:
             ui_elements=ui_elements,
             visited_screens=[s.screen_name for s in self.state.screens.values()],
             current_path=self.state.current_path,
+            avoid_flows=self.config.avoid_flows or None,
         )
 
         self._record_screen(screenshot, screen_id, analysis)
@@ -298,6 +300,7 @@ class Crawler:
                 [s.screen_name for s in self.state.screens.values()],
                 recent_actions=recent_actions,
                 target_package=self.config.package,
+                avoid_flows=self.config.avoid_flows or None,
             )
             # Record this action so we don't repeat it on this screen
             action_desc = f"{action.action} at ({action.x},{action.y}) {action.reason[:60]}"

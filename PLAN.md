@@ -92,6 +92,9 @@ Results from first crawl (Settings app):
 - [ ] Improve loop detection — track per-element tap history, not just screen revisit count
 - [ ] Add crawl resume/continuation — `--continue-from <crawl-dir>` flag to reload state graph and screen hashes from a previous run, skip known screens, and continue exploring unvisited areas. Also enables resuming after crash.
 
+**Smart content wait:**
+- [ ] After each action, compare consecutive screenshots — keep waiting until the screen stabilises (hash stops changing). Handles network-dependent screens that take variable time to load. Falls back to max wait timeout.
+
 **Crawl monitoring:**
 - [ ] Write `progress.json` to output dir after each action (screen count, action count, current screen name) — enables external monitoring
 - [ ] Add `--live` flag for unbuffered console output so progress is visible in real time when running in foreground

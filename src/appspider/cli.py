@@ -34,6 +34,7 @@ def main(verbose: bool) -> None:
 @click.option("--delay", default=1.5, type=float, help="Seconds to wait after each action")
 @click.option("--model", default=None, help="Claude model to use (e.g. claude-sonnet-4-5-20241022)")
 @click.option("--fresh", is_flag=True, help="Clear app data before crawling (starts from initial screen)")
+@click.option("--avoid", multiple=True, help="Flows to avoid, e.g. --avoid registration --avoid login")
 def crawl(
     package: str,
     max_screens: int,
@@ -44,6 +45,7 @@ def crawl(
     delay: float,
     model: str | None,
     fresh: bool,
+    avoid: tuple[str, ...],
 ) -> None:
     """Crawl an app's UI and document all screens and flows.
 
@@ -75,6 +77,9 @@ def crawl(
         except ADBError as e:
             click.echo(f"Warning: Failed to clear app data: {e}", err=True)
 
+    if avoid:
+        click.echo(f"Avoiding flows: {', '.join(avoid)}")
+
     config = CrawlConfig(
         package=package,
         max_screens=max_screens,
@@ -82,6 +87,7 @@ def crawl(
         max_depth=max_depth,
         output_dir=output,
         settle_delay=delay,
+        avoid_flows=list(avoid),
     )
 
     try:

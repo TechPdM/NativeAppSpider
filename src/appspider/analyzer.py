@@ -98,6 +98,7 @@ class Analyzer:
         ui_elements: list[dict] | None = None,
         visited_screens: list[str] | None = None,
         current_path: list[str] | None = None,
+        avoid_flows: list[str] | None = None,
     ) -> ScreenAnalysis:
         """Analyze a screenshot and return structured screen documentation."""
         context_parts = []
@@ -109,6 +110,11 @@ class Analyzer:
             context_parts.append(f"Already visited screens: {', '.join(visited_screens[-20:])}")
         if current_path:
             context_parts.append(f"Navigation path to here: {' → '.join(current_path)}")
+        if avoid_flows:
+            context_parts.append(
+                f"AVOIDED FLOWS: The following flows should be skipped: {', '.join(avoid_flows)}. "
+                f"Note in the description if this screen is part of an avoided flow."
+            )
 
         context = "\n\n".join(context_parts)
 
@@ -182,6 +188,7 @@ Return ONLY valid JSON, no markdown fences.""",
         visited_screens: list[str],
         recent_actions: list[str] | None = None,
         target_package: str | None = None,
+        avoid_flows: list[str] | None = None,
     ) -> NavigationAction:
         """Decide which action to take next to maximize exploration coverage."""
         context_parts = []
@@ -194,6 +201,11 @@ Return ONLY valid JSON, no markdown fences.""",
             context_parts.append(
                 f"Target app: {target_package}. Stay within this app. "
                 f"If you've left the app (e.g. home screen), use 'back' to return."
+            )
+        if avoid_flows:
+            context_parts.append(
+                f"AVOID these flows — do NOT tap elements that lead into: {', '.join(avoid_flows)}. "
+                f"If the current screen is part of an avoided flow, use \"back\" immediately."
             )
         extra_context = "\n\n".join(context_parts)
 
