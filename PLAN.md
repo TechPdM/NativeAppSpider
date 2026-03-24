@@ -2,19 +2,21 @@
 
 ## Current Status
 
-All code fixes and unit tests from Phase 1 are complete. The codebase is ready for real-device testing. Next step: set up an Android emulator and run the first crawl.
+Phase 1 code fixes, unit tests, and first successful crawl are complete. The tool has been validated against the Android Settings app (10 screens, 17 actions, 13 transitions). Issues found during first crawl (transition recording, screen size override, duplicate names) have been fixed. Next step: additional crawls against more complex apps, then Phase 2 hardening.
 
 | Component | Status | Notes |
 |---|---|---|
-| Project structure | Done | `pyproject.toml`, package layout, CLI entry point |
-| Architecture docs | Done | `ARCHITECTURE.md`, `CLAUDE.md` |
-| CLI (`cli.py`) | Done | Startup validation (API key, device connectivity, screen size), verbose flag |
-| Device interface (`device.py`) | Done | `ADBError` exceptions, return code checking, `is_connected()`, `get_screen_size()`, `is_package_installed()`, in-memory screenshots |
+| Project structure | Done | `pyproject.toml`, package layout, CLI entry point, dev dependencies |
+| Architecture docs | Done | `ARCHITECTURE.md`, `CLAUDE.md`, `README.md` with setup guide |
+| CLI (`cli.py`) | Done | Startup validation, `--model`/`--verbose` flags, report input validation |
+| Device interface (`device.py`) | Done | `ADBError`, return code checking, `is_connected()`, `get_screen_size()` with override support, `is_package_installed()`, `am start` launcher with monkey fallback |
 | Perceptual hasher (`hasher.py`) | Done | Average hash + similarity check |
-| Screen analyzer (`analyzer.py`) | Done | API key validation, retry with backoff, response structure validation, unknown action fallback |
-| Crawl loop (`crawler.py`) | Done | Per-step error recovery, real device dimensions for swipes, app launch verification |
+| Screen analyzer (`analyzer.py`) | Done | API key validation, retry with backoff, response validation, default model `claude-sonnet-4-6` |
+| Crawl loop (`crawler.py`) | Done | Per-step error recovery, device dimensions for swipes, forward transition recording, duplicate screen name deduplication |
 | Reporter (`reporter.py`) | Done | HTML generation with Mermaid, self-contained output |
-| Tests | Done | 71 unit tests, all passing (1.8s), fully mocked |
+| Tests | Done | 71 unit tests, all passing (~1.8s), fully mocked |
+| Android environment | Done | Homebrew CLI setup, AVD `appspider_test` (Android 14, arm64) |
+| First crawl | Done | Settings app: 10 screens, 13 transitions, valid report |
 
 ---
 
@@ -36,12 +38,19 @@ All code fixes and unit tests from Phase 1 are complete. The codebase is ready f
 - [x] Validate AI response structure — handle missing fields, default missing x/y to fallback
 
 **First real crawls:**
-- [ ] Set up Android emulator, document setup steps
-- [ ] Crawl a simple app (e.g. Settings) — verify full pipeline end-to-end
+- [x] Set up Android emulator, document setup steps — Homebrew CLI tools, AVD `appspider_test`
+- [x] Crawl a simple app (Settings) — 10 screens, 17 actions, 13 transitions. Fixed 3 issues found during crawl.
 - [ ] Crawl a medium app (tabs, lists, modals) — stress test the state graph
 - [ ] Crawl a complex app (login, scrollable content, nested navigation)
 - [ ] Tune hash threshold and settle delay based on real results
 - [ ] Review and improve AI prompts based on real Claude responses
+
+**Issues found and fixed during first crawl:**
+- [x] Forward tap transitions not recorded — moved edge recording to start of next iteration
+- [x] Screen size used physical (320x640) instead of override (1080x1920) — prefer override line
+- [x] Duplicate screen names in output — added deduplication with numeric suffixes
+- [x] `monkey` launcher returns non-zero exit code — switched to `am start`, monkey as fallback
+- [x] Model ID needed to be `claude-sonnet-4-6` (no date suffix) — fixed default, added `--model` CLI flag
 
 **Unit tests** (71 tests, all passing in ~1.8s, fully mocked):
 - [x] `test_hasher.py` — hash consistency, similarity detection, threshold boundaries (8 tests)
@@ -52,13 +61,13 @@ All code fixes and unit tests from Phase 1 are complete. The codebase is ready f
 
 ### Phase 1 Validation Checklist
 
-Run after each real crawl:
-- [ ] Crawl completes without crashing
-- [ ] Discovered screens have meaningful names (not "unknown" or "parse_error")
-- [ ] Screenshot files are valid PNGs
-- [ ] State graph has edges (transitions were recorded)
-- [ ] HTML report opens in browser and displays all screens
-- [ ] No infinite loops (crawl didn't burn all actions on 2-3 screens)
+Results from first crawl (Settings app):
+- [x] Crawl completes without crashing
+- [x] Discovered screens have meaningful names (not "unknown" or "parse_error")
+- [x] Screenshot files are valid PNGs
+- [x] State graph has edges (13 transitions recorded)
+- [x] HTML report opens in browser and displays all screens
+- [x] No infinite loops (10 screens in 17 actions)
 
 ---
 
@@ -150,14 +159,18 @@ pytest -m e2e                   # Live device — manual sanity checks
 
 ## Environment Setup
 
-To start Phase 1, you need:
+Installed via Homebrew CLI approach (see `README.md` for full instructions):
 
-1. **Android Studio** (or standalone SDK) with at least one AVD configured
-2. **ADB** on `$PATH`
-3. **`ANTHROPIC_API_KEY`** set
-4. **Python 3.12+** with the project installed (`pip install -e .`)
+- **Android SDK**: `/opt/homebrew/share/android-commandlinetools`
+- **ADB**: `/opt/homebrew/share/android-commandlinetools/platform-tools/adb`
+- **AVD**: `appspider_test` (Android 14, Google APIs, arm64-v8a)
+- **Java**: Temurin JDK 25
+- **Emulator launch**: `emulator -avd appspider_test -no-audio -no-window`
+- **Resolution override**: `adb shell wm size 1080x1920`
 
 ```bash
+export PATH="/opt/homebrew/share/android-commandlinetools/platform-tools:$PATH"
+export ANTHROPIC_API_KEY=your-key
 adb devices          # Should list your emulator
-adb shell wm size    # Should return display dimensions
+adb shell wm size    # Should return override dimensions
 ```
