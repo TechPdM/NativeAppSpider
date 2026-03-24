@@ -33,6 +33,7 @@ def main(verbose: bool) -> None:
 @click.option("--serial", default=None, help="ADB device serial (optional)")
 @click.option("--delay", default=1.5, type=float, help="Seconds to wait after each action")
 @click.option("--model", default=None, help="Claude model to use (e.g. claude-sonnet-4-5-20241022)")
+@click.option("--fresh", is_flag=True, help="Clear app data before crawling (starts from initial screen)")
 def crawl(
     package: str,
     max_screens: int,
@@ -42,6 +43,7 @@ def crawl(
     serial: str | None,
     delay: float,
     model: str | None,
+    fresh: bool,
 ) -> None:
     """Crawl an app's UI and document all screens and flows.
 
@@ -65,6 +67,13 @@ def crawl(
     except ADBError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+    if fresh:
+        click.echo(f"Clearing app data for {package}...")
+        try:
+            device.clear_app_data(package)
+        except ADBError as e:
+            click.echo(f"Warning: Failed to clear app data: {e}", err=True)
 
     config = CrawlConfig(
         package=package,

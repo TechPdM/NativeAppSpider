@@ -195,6 +195,10 @@ class Device:
                         return part.rstrip("}")
         return "unknown"
 
+    def clear_app_data(self, package: str) -> None:
+        """Clear all app data (like a fresh install). App must be installed."""
+        self._run("shell", "pm", "clear", package)
+
     def is_package_installed(self, package: str) -> bool:
         """Check if a package is installed on the device."""
         result = self._run("shell", "pm", "list", "packages", package)

@@ -90,7 +90,12 @@ Results from first crawl (Settings app):
 - [ ] Handle orientation changes mid-crawl
 - [ ] Detect and scroll through scrollable containers for off-screen elements
 - [ ] Improve loop detection — track per-element tap history, not just screen revisit count
-- [ ] Add crawl resume — save state to disk periodically, allow resuming after crash
+- [ ] Add crawl resume/continuation — `--continue-from <crawl-dir>` flag to reload state graph and screen hashes from a previous run, skip known screens, and continue exploring unvisited areas. Also enables resuming after crash.
+
+**Crawl monitoring:**
+- [ ] Write `progress.json` to output dir after each action (screen count, action count, current screen name) — enables external monitoring
+- [ ] Add `--live` flag for unbuffered console output so progress is visible in real time when running in foreground
+- [ ] Add `--fresh` flag to run `adb shell pm clear <package>` before launch, ensuring app starts from its initial screen
 
 **E2E smoke test:**
 - [ ] `test_live_crawl.py` — crawl Settings with `max_screens=5`, assert >1 screen found

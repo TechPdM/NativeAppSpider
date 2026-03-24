@@ -99,6 +99,8 @@ class Crawler:
         consecutive_known = 0
         consecutive_failures = 0
         max_consecutive_failures = 10
+        consecutive_relaunches = 0
+        max_relaunches = 3
         prev_screen: str | None = None
         prev_action: NavigationAction | None = None
 
@@ -142,6 +144,21 @@ class Crawler:
 
             # Check if we've left the target app — re-launch if so
             if self._is_outside_target_app():
+                consecutive_relaunches += 1
+                if consecutive_relaunches > max_relaunches:
+                    logger.error("Too many consecutive relaunches (%d), pressing back instead",
+                                 consecutive_relaunches)
+                    try:
+                        self.device.press_back()
+                        time.sleep(self.config.settle_delay)
+                    except ADBError:
+                        pass
+                    self.state.action_count += 1
+                    # If still outside after several back attempts, give up
+                    if consecutive_relaunches > max_relaunches + 3:
+                        consecutive_relaunches = 0
+                    continue
+
                 print(f"  [relaunch] Left target app, re-launching {self.config.package}")
                 try:
                     self.device.launch_app(self.config.package)
@@ -154,6 +171,8 @@ class Crawler:
                 prev_screen = None
                 prev_action = None
                 continue
+            else:
+                consecutive_relaunches = 0
 
             # Update path
             if screen_id not in self.state.current_path:
