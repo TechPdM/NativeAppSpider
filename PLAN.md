@@ -39,9 +39,9 @@ Phase 1 code fixes, unit tests, and first successful crawl are complete. The too
 
 **First real crawls:**
 - [x] Set up Android emulator, document setup steps — Homebrew CLI tools, AVD `appspider_test`
-- [x] Crawl a simple app (Settings) — 10 screens, 17 actions, 13 transitions. Fixed 3 issues found during crawl.
-- [ ] Crawl a medium app (tabs, lists, modals) — stress test the state graph
-- [ ] Crawl a complex app (login, scrollable content, nested navigation)
+- [x] Crawl a simple app (Settings) — 10 screens, 17 actions, 13 transitions
+- [x] Crawl a medium app (Clock) — 15 screens, 26 actions, 19 transitions. Navigated all 5 tabs + bedtime setup flow.
+- [x] Crawl a complex app (Contacts) — 15 screens, 39 actions, 20 transitions. Onboarding skip, nav drawer, settings, contact form, dialer.
 - [ ] Tune hash threshold and settle delay based on real results
 - [ ] Review and improve AI prompts based on real Claude responses
 
@@ -51,6 +51,7 @@ Phase 1 code fixes, unit tests, and first successful crawl are complete. The too
 - [x] Duplicate screen names in output — added deduplication with numeric suffixes
 - [x] `monkey` launcher returns non-zero exit code — switched to `am start`, monkey as fallback
 - [x] Model ID needed to be `claude-sonnet-4-6` (no date suffix) — fixed default, added `--model` CLI flag
+- [x] Infinite loop on persistent screenshot failures (Chrome crawl) — added max consecutive failure limit (10), breaks crawl cleanly
 
 **Unit tests** (71 tests, all passing in ~1.8s, fully mocked):
 - [x] `test_hasher.py` — hash consistency, similarity detection, threshold boundaries (8 tests)

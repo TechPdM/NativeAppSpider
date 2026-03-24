@@ -95,6 +95,8 @@ class Crawler:
 
         # Main crawl loop
         consecutive_known = 0
+        consecutive_failures = 0
+        max_consecutive_failures = 10
         prev_screen: str | None = None
         prev_action: NavigationAction | None = None
 
@@ -104,8 +106,14 @@ class Crawler:
         ):
             try:
                 screenshot, screen_id, is_new = self._capture_and_identify()
+                consecutive_failures = 0
             except ADBError as e:
-                logger.error("Screenshot failed: %s", e)
+                consecutive_failures += 1
+                logger.error("Screenshot failed (%d/%d): %s",
+                             consecutive_failures, max_consecutive_failures, e)
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error("Too many consecutive screenshot failures, stopping crawl")
+                    break
                 time.sleep(self.config.settle_delay)
                 continue
 
