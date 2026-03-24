@@ -32,7 +32,7 @@ Download [Android Studio](https://developer.android.com/studio). It includes the
 
 1. Open Android Studio → Tools → Device Manager
 2. Create a new virtual device (e.g. Pixel 7, API 34)
-3. Launch the emulator
+3. Launch the emulator (DNS works automatically when launched with a GUI)
 4. ADB is at `~/Library/Android/sdk/platform-tools/adb` — add it to your PATH:
    ```bash
    export PATH="$HOME/Library/Android/sdk/platform-tools:$PATH"
@@ -54,15 +54,29 @@ sdkmanager "platform-tools" "emulator" "platforms;android-34" \
 avdmanager create avd -n appspider_test \
   -k "system-images;android-34;google_apis;arm64-v8a"
 
-# Launch the emulator
-emulator -avd appspider_test
+# Launch the emulator (headless, with DNS configured)
+emulator -avd appspider_test -no-audio -no-window -dns-server 8.8.8.8,8.8.4.4
+```
+
+**Important:** The `-dns-server` flag is required for apps that load network content (maps, API data, etc.). Without it, the headless emulator has IP connectivity but no DNS resolution, so network requests will fail silently.
+
+If you need a specific screen resolution (e.g. for accurate tap coordinates):
+```bash
+adb shell wm size 1080x1920
+adb shell wm density 420
+```
+
+To set GPS location (e.g. Bristol, UK — useful for location-based apps):
+```bash
+adb emu geo fix -2.5879 51.4545
 ```
 
 ### Verify Setup
 
 ```bash
-adb devices          # Should list your emulator (e.g. "emulator-5554  device")
-adb shell wm size    # Should return display dimensions (e.g. "Physical size: 1080x2400")
+adb devices              # Should list your emulator (e.g. "emulator-5554  device")
+adb shell wm size        # Should return display dimensions
+adb shell ping google.com  # Should resolve and get responses (verifies DNS)
 ```
 
 ## Usage
