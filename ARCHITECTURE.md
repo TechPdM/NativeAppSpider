@@ -213,6 +213,24 @@ This model naturally represents:
 - Modal dialogs (screen → dialog → same screen)
 - Dead ends (screens with no outgoing edges besides "back")
 
+## Black-Box Approach
+
+AppSpider requires **no access to app source code**. It works on any app installed on a connected device or emulator, the same way a human tester would — by looking at the screen and tapping.
+
+**Why this works without source code:**
+- **ADB** operates at the OS level — screenshots, taps, and UI hierarchy dumps work on any app regardless of who built it
+- **`uiautomator dump`** reads the accessibility tree exposed by the Android framework, not app internals
+- **Claude** analyzes screenshots visually — it identifies buttons, text, and navigation elements from pixels
+- **App launching** uses the package name, which is public (`adb shell pm list packages` lists all installed apps)
+
+**Limitations of the black-box approach:**
+- **Login/auth** — the crawler can't generate valid credentials. They must be provided as config, or the crawl is limited to pre-login screens.
+- **Deep links** — without knowing the app's intent filters, the crawler can't jump directly to deep screens. It must navigate there through the UI.
+- **Obfuscated element IDs** — ProGuard/R8 can strip meaningful resource IDs, so `uiautomator dump` may show `com.app:id/a1` instead of `com.app:id/login_button`. This has minimal impact since Claude reads the screenshot visually rather than relying on IDs.
+- **Server-driven UI** — screens that require specific backend state (e.g., "order in progress") won't appear unless that state exists on the account being crawled.
+
+None of these are blockers — they limit crawl depth on certain apps but don't prevent the tool from working.
+
 ## Key Design Decisions
 
 ### ADB over Appium
