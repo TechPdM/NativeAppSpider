@@ -180,9 +180,23 @@ Return ONLY valid JSON, no markdown fences.""",
         screenshot: Image.Image,
         clickable_elements: list[dict],
         visited_screens: list[str],
-        exploration_goal: str = "Explore as many unique screens as possible",
+        recent_actions: list[str] | None = None,
+        target_package: str | None = None,
     ) -> NavigationAction:
         """Decide which action to take next to maximize exploration coverage."""
+        context_parts = []
+        if recent_actions:
+            context_parts.append(
+                f"Recent actions taken on this screen (DO NOT repeat these):\n"
+                + "\n".join(f"  - {a}" for a in recent_actions[-5:])
+            )
+        if target_package:
+            context_parts.append(
+                f"Target app: {target_package}. Stay within this app. "
+                f"If you've left the app (e.g. home screen), use 'back' to return."
+            )
+        extra_context = "\n\n".join(context_parts)
+
         response = _call_with_retry(
             self._client,
             model=self._model,
@@ -202,17 +216,22 @@ Return ONLY valid JSON, no markdown fences.""",
                         "type": "text",
                         "text": f"""You are a mobile app crawler. Decide the single best next action to explore this app.
 
-Goal: {exploration_goal}
-
 Clickable elements on screen:
 {json.dumps(clickable_elements[:20], indent=2)}
 
 Already visited screens: {', '.join(visited_screens[-15:])}
 
+{extra_context}
+
+Rules:
+- Pick an action that leads to an UNVISITED screen
+- Do NOT repeat an action that was already tried on this screen
+- If all elements on this screen have been tried, use "back"
+- Prefer navigation elements (tabs, menu items, links) over data entry or toggles
+
 Return JSON:
 {{"action": "tap|swipe_up|swipe_down|back|type", "x": 0, "y": 0, "text": "", "reason": "why this action"}}
 
-Pick actions that lead to UNVISITED screens. If this screen looks fully explored, use "back".
 Return ONLY valid JSON.""",
                     },
                 ],

@@ -185,8 +185,10 @@ class Device:
         except ADBError:
             return "unknown"
 
+        # Look for various activity indicators across Android versions
+        indicators = ["topResumedActivity", "mResumedActivity", "mFocusedActivity", "mFocusedApp"]
         for line in result.stdout.splitlines():
-            if "mResumedActivity" in line or "mFocusedActivity" in line:
+            if any(ind in line for ind in indicators):
                 parts = line.strip().split()
                 for part in parts:
                     if "/" in part and "." in part:

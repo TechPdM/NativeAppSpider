@@ -55,6 +55,8 @@ class CrawlState:
     action_count: int = 0
     current_path: list[str] = field(default_factory=list)
     output_dir: Path = field(default_factory=lambda: Path("output"))
+    # Track actions tried per screen to avoid repeating them
+    screen_actions: dict[str, list[str]] = field(default_factory=dict)
 
     def find_matching_screen(self, hash_val: str, threshold: int = 12) -> str | None:
         """Find an existing screen that matches the given hash."""
@@ -138,6 +140,21 @@ class Crawler:
                     reason=prev_action.reason,
                 )
 
+            # Check if we've left the target app — re-launch if so
+            if self._is_outside_target_app():
+                print(f"  [relaunch] Left target app, re-launching {self.config.package}")
+                try:
+                    self.device.launch_app(self.config.package)
+                    time.sleep(self.config.settle_delay * 2)
+                    self.state.current_path.clear()
+                    consecutive_known = 0
+                except ADBError as e:
+                    logger.error("Re-launch failed: %s", e)
+                self.state.action_count += 1
+                prev_screen = None
+                prev_action = None
+                continue
+
             # Update path
             if screen_id not in self.state.current_path:
                 self.state.current_path.append(screen_id)
@@ -168,6 +185,13 @@ class Crawler:
         print(f"\nCrawl complete: {len(self.state.screens)} screens, "
               f"{self.state.action_count} actions")
         return self.state
+
+    def _is_outside_target_app(self) -> bool:
+        """Check if the foreground activity belongs to a different app."""
+        activity = self.device.current_activity()
+        if activity == "unknown":
+            return False  # Can't tell, assume we're still in the app
+        return self.config.package not in activity
 
     def _capture_and_identify(self) -> tuple[Image.Image, str, bool]:
         """Capture screenshot, hash it, return (image, screen_id, is_new)."""
@@ -248,11 +272,18 @@ class Crawler:
                 {"label": e.label, "center": e.center, "class": e.class_name}
                 for e in clickable
             ]
-            return self.analyzer.decide_next_action(
+            recent_actions = self.state.screen_actions.get(screen_id, [])
+            action = self.analyzer.decide_next_action(
                 screenshot,
                 elements_for_ai,
                 [s.screen_name for s in self.state.screens.values()],
+                recent_actions=recent_actions,
+                target_package=self.config.package,
             )
+            # Record this action so we don't repeat it on this screen
+            action_desc = f"{action.action} at ({action.x},{action.y}) {action.reason[:60]}"
+            self.state.screen_actions.setdefault(screen_id, []).append(action_desc)
+            return action
         except Exception as e:
             logger.error("Navigation decision failed: %s", e)
             return NavigationAction(action="back", reason=f"decision error: {e}")
