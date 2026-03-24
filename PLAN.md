@@ -2,21 +2,21 @@
 
 ## Current Status
 
-Phase 1 code fixes, unit tests, and first successful crawl are complete. The tool has been validated against the Android Settings app (10 screens, 17 actions, 13 transitions). Issues found during first crawl (transition recording, screen size override, duplicate names) have been fixed. Next step: additional crawls against more complex apps, then Phase 2 hardening.
+**Phase 1 is complete.** All bug fixes, error handling, unit tests, real-device crawls, and prompt tuning are done. The tool has been validated against 3 apps (Settings, Clock, Contacts) with consistent results. Ready for Phase 2 hardening.
 
 | Component | Status | Notes |
 |---|---|---|
 | Project structure | Done | `pyproject.toml`, package layout, CLI entry point, dev dependencies |
 | Architecture docs | Done | `ARCHITECTURE.md`, `CLAUDE.md`, `README.md` with setup guide |
 | CLI (`cli.py`) | Done | Startup validation, `--model`/`--verbose` flags, report input validation |
-| Device interface (`device.py`) | Done | `ADBError`, return code checking, `is_connected()`, `get_screen_size()` with override support, `is_package_installed()`, `am start` launcher with monkey fallback |
-| Perceptual hasher (`hasher.py`) | Done | Average hash + similarity check |
-| Screen analyzer (`analyzer.py`) | Done | API key validation, retry with backoff, response validation, default model `claude-sonnet-4-6` |
-| Crawl loop (`crawler.py`) | Done | Per-step error recovery, device dimensions for swipes, forward transition recording, duplicate screen name deduplication |
+| Device interface (`device.py`) | Done | `ADBError`, return code checking, `is_connected()`, `get_screen_size()` with override, `am start` launcher, `current_activity()` for Android 14+ |
+| Perceptual hasher (`hasher.py`) | Done | Average hash + similarity check, threshold validated against real data |
+| Screen analyzer (`analyzer.py`) | Done | API key validation, retry with backoff, response validation, action history to prevent repeat taps, target package awareness |
+| Crawl loop (`crawler.py`) | Done | Per-step error recovery, device dimensions, forward transitions, duplicate name dedup, app re-launch on escape, per-screen action tracking, max screenshot failure limit |
 | Reporter (`reporter.py`) | Done | HTML generation with Mermaid, self-contained output |
 | Tests | Done | 71 unit tests, all passing (~1.8s), fully mocked |
 | Android environment | Done | Homebrew CLI setup, AVD `appspider_test` (Android 14, arm64) |
-| First crawl | Done | Settings app: 10 screens, 13 transitions, valid report |
+| Real crawls | Done | Settings (10 screens), Clock (15 screens), Contacts (15 screens) |
 
 ---
 
@@ -42,8 +42,8 @@ Phase 1 code fixes, unit tests, and first successful crawl are complete. The too
 - [x] Crawl a simple app (Settings) — 10 screens, 17 actions, 13 transitions
 - [x] Crawl a medium app (Clock) — 15 screens, 26 actions, 19 transitions. Navigated all 5 tabs + bedtime setup flow.
 - [x] Crawl a complex app (Contacts) — 15 screens, 39 actions, 20 transitions. Onboarding skip, nav drawer, settings, contact form, dialer.
-- [ ] Tune hash threshold and settle delay based on real results
-- [ ] Review and improve AI prompts based on real Claude responses
+- [x] Tune hash threshold and settle delay — threshold of 12 validated correct via pairwise distance analysis; raising it would cause false merges between similar-looking but distinct screens
+- [x] Review and improve AI prompts — added per-screen action history (prevents repeat taps), target package context (stay in app), explicit rules (prefer navigation over toggles)
 
 **Issues found and fixed during first crawl:**
 - [x] Forward tap transitions not recorded — moved edge recording to start of next iteration
@@ -52,6 +52,9 @@ Phase 1 code fixes, unit tests, and first successful crawl are complete. The too
 - [x] `monkey` launcher returns non-zero exit code — switched to `am start`, monkey as fallback
 - [x] Model ID needed to be `claude-sonnet-4-6` (no date suffix) — fixed default, added `--model` CLI flag
 - [x] Infinite loop on persistent screenshot failures (Chrome crawl) — added max consecutive failure limit (10), breaks crawl cleanly
+- [x] AI repeats same tap on a screen — added per-screen action history, passed to navigation prompt
+- [x] Crawler escapes target app and gets stuck on home screen — added `_is_outside_target_app()` check with auto re-launch
+- [x] `current_activity()` returns "unknown" on Android 14 — added `topResumedActivity` to indicator list
 
 **Unit tests** (71 tests, all passing in ~1.8s, fully mocked):
 - [x] `test_hasher.py` — hash consistency, similarity detection, threshold boundaries (8 tests)
