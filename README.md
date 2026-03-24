@@ -91,6 +91,12 @@ appspider crawl com.example.app --max-screens 20 --max-actions 50
 # Target a specific device
 appspider crawl com.example.app --serial emulator-5554
 
+# Fresh start (clears app data so it launches from the initial screen)
+appspider crawl com.example.app --fresh
+
+# Skip specific flows (e.g. avoid registration/login during exploration)
+appspider crawl com.example.app --avoid registration --avoid login --avoid "sign up"
+
 # Verbose logging
 appspider -v crawl com.example.app
 
