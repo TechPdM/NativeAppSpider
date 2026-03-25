@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**Phase 1 is complete.** All bug fixes, error handling, unit tests, real-device crawls, and prompt tuning are done. The tool has been validated against 3 apps (Settings, Clock, Contacts) with consistent results. Ready for Phase 2 hardening.
+**Phase 1 is complete.** All bug fixes, error handling, unit tests, real-device crawls, and prompt tuning are done. The tool has been validated against 4 apps (Settings, Clock, Contacts, Zapmap) with consistent results. Ready for Phase 2 hardening.
 
 | Component | Status | Notes |
 |---|---|---|
@@ -16,7 +16,17 @@
 | Reporter (`reporter.py`) | Done | HTML generation with Mermaid, self-contained output |
 | Tests | Done | 71 unit tests, all passing (~1.8s), fully mocked |
 | Android environment | Done | Homebrew CLI setup, AVD `appspider_test` (Android 14, arm64) |
-| Real crawls | Done | Settings (10 screens), Clock (15 screens), Contacts (15 screens) |
+| Real crawls | Done | Settings (10), Clock (15), Contacts (15), Zapmap (17) |
+
+### Known Limitations
+
+- **No crawl resume** — each run starts from scratch. Can't continue from a previous crawl's state.
+- **Fixed delay only** — no smart wait for network content. Slow APIs may not load in time (mitigated by `--delay` flag).
+- **No scroll discovery** — only captures what's visible in the viewport. Content below the fold is missed.
+- **GPS on headless emulator** — `geo fix` doesn't work with apps using Fused Location Provider (Google Play Services). Location works via IP geolocation or AVD config but isn't reliably controllable.
+- **Auth-gated screens** — screens behind login can't be explored without credentials. The `--avoid` flag helps skip auth flows but doesn't solve accessing authenticated content.
+- **System intents** — camera, file picker, and other system activities launched by the app can trigger relaunch loops (mitigated by max relaunch limit, but the crawler loses its place).
+- **Dynamic content** — screens with changing content (timers, animations, live data) can cause hash instability, leading to duplicate screen entries or missed revisit detection.
 
 ---
 
