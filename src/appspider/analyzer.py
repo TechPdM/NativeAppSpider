@@ -50,6 +50,7 @@ def check_api_key() -> None:
 
 
 def _image_to_base64(image: Image.Image) -> str:
+    """Convert a PIL Image to a base64-encoded PNG string for the Claude API."""
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     return base64.standard_b64encode(buf.getvalue()).decode()
@@ -58,6 +59,7 @@ def _image_to_base64(image: Image.Image) -> str:
 def _parse_json_response(text: str) -> dict:
     """Parse JSON from Claude's response, handling markdown fences."""
     text = text.strip()
+    # Claude sometimes wraps JSON in markdown code fences — strip them if present
     if text.startswith("```"):
         text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
     return json.loads(text)
@@ -69,12 +71,14 @@ def _call_with_retry(client: anthropic.Anthropic, **kwargs) -> anthropic.types.M
         try:
             return client.messages.create(**kwargs)
         except anthropic.RateLimitError:
+            # Rate limits are expected during heavy crawls — back off and retry
             if attempt == MAX_RETRIES - 1:
                 raise
             delay = RETRY_BASE_DELAY * (2 ** attempt)
             logger.warning("Rate limited, retrying in %.1fs (attempt %d/%d)", delay, attempt + 1, MAX_RETRIES)
             time.sleep(delay)
         except anthropic.APIStatusError as e:
+            # Retry on server errors (5xx) but not client errors (4xx)
             if e.status_code >= 500 and attempt < MAX_RETRIES - 1:
                 delay = RETRY_BASE_DELAY * (2 ** attempt)
                 logger.warning("API error %d, retrying in %.1fs", e.status_code, delay)
@@ -101,12 +105,17 @@ class Analyzer:
         avoid_flows: list[str] | None = None,
     ) -> ScreenAnalysis:
         """Analyze a screenshot and return structured screen documentation."""
+        # Build context to help Claude make better decisions. Each piece of
+        # context gives the model awareness of what's on screen, where we've
+        # been, and what to avoid — all of which reduce redundant exploration.
         context_parts = []
         if ui_elements:
+            # Cap at 30 elements to stay within token budget
             context_parts.append(
                 f"UI hierarchy elements (clickable): {json.dumps(ui_elements[:30], indent=2)}"
             )
         if visited_screens:
+            # Show the 20 most recent screens so Claude can suggest unvisited targets
             context_parts.append(f"Already visited screens: {', '.join(visited_screens[-20:])}")
         if current_path:
             context_parts.append(f"Navigation path to here: {' → '.join(current_path)}")
@@ -261,6 +270,8 @@ Return ONLY valid JSON.""",
             logger.warning("Failed to parse navigation action JSON, falling back to 'back'")
             return NavigationAction(action="back", reason="failed to parse AI response")
 
+        # Validate the action type — fall back to "back" for anything unexpected
+        # so the crawler always makes progress instead of crashing
         action = data.get("action", "back")
         if action not in ("tap", "swipe_up", "swipe_down", "back", "type"):
             logger.warning("Unknown action '%s', falling back to 'back'", action)

@@ -92,15 +92,17 @@ class Crawler:
         self.device.launch_app(self.config.package)
         time.sleep(self.config.settle_delay * 2)  # Extra wait for app launch
 
-        # Main crawl loop
-        consecutive_known = 0
-        consecutive_failures = 0
-        max_consecutive_failures = 10
-        consecutive_relaunches = 0
-        max_relaunches = 3
-        prev_screen: str | None = None
-        prev_action: NavigationAction | None = None
+        # --- Main crawl loop bookkeeping ---
+        consecutive_known = 0          # how many steps in a row hit an already-seen screen
+        consecutive_failures = 0       # how many screenshots in a row failed (device issues)
+        max_consecutive_failures = 10  # bail out if device seems unreachable
+        consecutive_relaunches = 0     # how many times we've re-launched the app back-to-back
+        max_relaunches = 3             # after this many, try pressing back instead
+        prev_screen: str | None = None       # screen we were on before the last action
+        prev_action: NavigationAction | None = None  # last action taken (for recording transitions)
 
+        # Keep exploring until we hit either the action budget or the screen
+        # discovery limit — whichever comes first
         while (
             self.state.action_count < self.config.max_actions
             and len(self.state.screens) < self.config.max_screens
@@ -118,14 +120,18 @@ class Crawler:
                 time.sleep(self.config.settle_delay)
                 continue
 
-            # Fetch clickable elements once per iteration (used by both analyze and decide)
+            # Fetch clickable elements once per iteration — reused by both the
+            # screen analyzer (to document elements) and the action decider
             clickable = self.device.get_clickable_elements()
 
             if is_new:
                 consecutive_known = 0
                 try:
+                    # Send the screenshot to Claude for analysis and documentation
                     self._process_new_screen(screenshot, screen_id, clickable)
                 except Exception as e:
+                    # If Claude fails (network, parsing, etc.), still record the
+                    # screen so we don't keep trying to analyze it on revisits
                     logger.error("Failed to analyze screen: %s", e)
                     self._record_minimal_screen(screenshot, screen_id)
             else:
@@ -134,7 +140,9 @@ class Crawler:
                 print(f"  [revisit] {self.state.screens[screen_id].screen_name} "
                       f"(visited {self.state.screens[screen_id].visit_count}x)")
 
-            # Record transition from previous action (now that current screen is identified)
+            # Record the state transition as an edge in the graph. We only
+            # record it when the screen actually changed (i.e. the action navigated
+            # somewhere new, not just refreshed the same screen).
             if prev_screen is not None and prev_action is not None and screen_id != prev_screen:
                 self.state.graph.add_edge(
                     prev_screen, screen_id,
@@ -142,10 +150,13 @@ class Crawler:
                     reason=prev_action.reason,
                 )
 
-            # Check if we've left the target app — re-launch if so
+            # Check if we've left the target app (e.g. tapped a deep link or ad
+            # that opened a browser). If so, try to get back into the target app.
             if self._is_outside_target_app():
                 consecutive_relaunches += 1
                 if consecutive_relaunches > max_relaunches:
+                    # Re-launching keeps landing outside the app — try pressing
+                    # back instead, which sometimes returns us to the target app
                     logger.error("Too many consecutive relaunches (%d), pressing back instead",
                                  consecutive_relaunches)
                     try:
@@ -154,7 +165,8 @@ class Crawler:
                     except ADBError:
                         pass
                     self.state.action_count += 1
-                    # If still outside after several back attempts, give up
+                    # After several back attempts with no luck, reset the counter
+                    # so we'll try re-launching again on the next iteration
                     if consecutive_relaunches > max_relaunches + 3:
                         consecutive_relaunches = 0
                     continue
@@ -174,7 +186,8 @@ class Crawler:
             else:
                 consecutive_relaunches = 0
 
-            # Update path
+            # Track our navigation depth. Only append if the screen isn't
+            # already in the path (avoids duplicates from revisits).
             if screen_id not in self.state.current_path:
                 self.state.current_path.append(screen_id)
 
@@ -196,6 +209,8 @@ class Crawler:
 
             time.sleep(self.config.settle_delay)
 
+            # Pressing back pops the navigation stack so our depth tracking
+            # stays in sync with the device's actual back stack
             if action.action == "back" and self.state.current_path:
                 self.state.current_path.pop()
 
@@ -283,9 +298,15 @@ class Crawler:
         consecutive_known: int,
         clickable: list,
     ) -> NavigationAction:
-        """Decide the next navigation action."""
+        """Decide the next navigation action.
+
+        Uses heuristic short-circuits first (stuck detection, depth limit),
+        then falls back to Claude for intelligent exploration decisions.
+        """
+        # If we keep landing on already-seen screens, we're in a loop — back out
         if consecutive_known > 5:
             return NavigationAction(action="back", reason="stuck in loop")
+        # Don't go deeper than the configured limit — breadth-first is more useful
         if len(self.state.current_path) > self.config.max_depth:
             return NavigationAction(action="back", reason="max depth reached")
 
@@ -303,7 +324,8 @@ class Crawler:
                 target_package=self.config.package,
                 avoid_flows=self.config.avoid_flows or None,
             )
-            # Record this action so we don't repeat it on this screen
+            # Record what we did on this screen so Claude won't suggest the
+            # same action again on future visits to this screen
             action_desc = f"{action.action} at ({action.x},{action.y}) {action.reason[:60]}"
             self.state.screen_actions.setdefault(screen_id, []).append(action_desc)
             return action
@@ -312,24 +334,36 @@ class Crawler:
             return NavigationAction(action="back", reason=f"decision error: {e}")
 
     def _execute_action(self, action: NavigationAction) -> None:
-        """Execute a navigation action on the device."""
+        """Execute a navigation action on the device.
+
+        Swipes use the center of the screen and cover half the screen height
+        to reliably scroll content without triggering edge gestures.
+        """
         w, h = self._screen_w, self._screen_h
         match action.action:
             case "tap":
                 self.device.tap(action.x, action.y)
             case "swipe_up":
+                # Swipe from 75% to 25% of screen height (scrolls content up)
                 self.device.swipe(w // 2, h * 3 // 4, w // 2, h // 4)
             case "swipe_down":
+                # Swipe from 25% to 75% of screen height (scrolls content down)
                 self.device.swipe(w // 2, h // 4, w // 2, h * 3 // 4)
             case "back":
                 self.device.press_back()
             case "type":
                 self.device.input_text(action.text)
             case _:
+                # Unknown action type — safest fallback is pressing back
                 self.device.press_back()
 
     def _deduplicate_screen_names(self) -> None:
-        """Append numeric suffixes to duplicate screen names."""
+        """Append numeric suffixes to duplicate screen names.
+
+        Claude sometimes gives the same name to visually similar but distinct
+        screens (e.g. two different "Settings" screens). This ensures unique
+        names in the final report and Mermaid diagram.
+        """
         name_counts: dict[str, int] = {}
         for node in self.state.screens.values():
             name_counts[node.screen_name] = name_counts.get(node.screen_name, 0) + 1
@@ -378,13 +412,14 @@ class Crawler:
             })
         (out / "transitions.json").write_text(json.dumps(edges, indent=2))
 
-        # Generate Mermaid diagram
+        # Generate Mermaid diagram — a top-down flowchart where each screen
+        # is a node and each navigation action is a labeled edge
         mermaid = ["graph TD"]
-        node_ids: dict[str, str] = {}
+        node_ids: dict[str, str] = {}  # map screen hash → short Mermaid node ID
         for i, (sid, node) in enumerate(self.state.screens.items()):
             nid = f"S{i}"
             node_ids[sid] = nid
-            safe_name = node.screen_name.replace('"', "'")
+            safe_name = node.screen_name.replace('"', "'")  # quotes break Mermaid syntax
             mermaid.append(f'    {nid}["{safe_name}"]')
 
         for u, v, data in self.state.graph.edges(data=True):

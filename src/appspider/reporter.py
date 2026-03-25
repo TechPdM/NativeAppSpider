@@ -9,14 +9,21 @@ from pathlib import Path
 
 
 def generate_html_report(crawl_dir: Path) -> Path:
-    """Generate a self-contained HTML report from crawl output."""
+    """Generate a self-contained HTML report from crawl output.
+
+    The report is fully self-contained — screenshots are embedded as base64
+    data URIs so the HTML file can be shared or opened anywhere without
+    needing the original image files.
+    """
     screens = json.loads((crawl_dir / "screens.json").read_text())
     transitions = json.loads((crawl_dir / "transitions.json").read_text())
-    mermaid = (crawl_dir / "flow.mmd").read_text()
+    mermaid = (crawl_dir / "flow.mmd").read_text()  # Mermaid flowchart rendered client-side via CDN
 
+    # Build an HTML card for each discovered screen, showing its screenshot,
+    # description, and interactive elements inventory
     cards = []
     for sid, screen in screens.items():
-        # Embed screenshot as base64
+        # Embed screenshot as base64 so the report is portable
         ss_path = Path(screen["screenshot"])
         if ss_path.exists():
             img_data = base64.b64encode(ss_path.read_bytes()).decode()

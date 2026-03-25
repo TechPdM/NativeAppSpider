@@ -42,8 +42,12 @@ class UIElement:
 
 
 def _parse_bounds(bounds_str: str) -> tuple[int, int, int, int]:
-    """Parse '[x1,y1][x2,y2]' into (x1, y1, x2, y2)."""
+    """Parse '[x1,y1][x2,y2]' into (x1, y1, x2, y2).
+
+    This is the bounds format used by Android's uiautomator XML dump.
+    """
     try:
+        # "[x1,y1][x2,y2]" → "x1,y1,x2,y2" → split into four ints
         parts = bounds_str.replace("][", ",").strip("[]").split(",")
         return tuple(int(p) for p in parts)  # type: ignore[return-value]
     except (ValueError, IndexError):
@@ -55,10 +59,12 @@ class Device:
 
     def __init__(self, serial: str | None = None):
         self._serial = serial
+        # When a serial is provided, all ADB commands target that specific device.
+        # Without it, ADB uses whatever single device/emulator is connected.
         self._adb_prefix = ["adb"]
         if serial:
             self._adb_prefix = ["adb", "-s", serial]
-        self._screen_size: tuple[int, int] | None = None
+        self._screen_size: tuple[int, int] | None = None  # cached after first query
 
     def _exec(
         self, *args: str, timeout: int = 30, binary: bool = False, strict: bool = True,
@@ -95,6 +101,8 @@ class Device:
             return False
 
         lines = result.stdout.strip().splitlines()
+        # `adb devices` output: header line, then "<serial>\t<state>" per device.
+        # A device is usable only when its state is "device" (not "offline"/"unauthorized").
         for line in lines[1:]:  # Skip header
             parts = line.split()
             if len(parts) >= 2 and parts[1] == "device":
@@ -142,8 +150,11 @@ class Device:
 
     def screenshot(self) -> Image.Image:
         """Capture a screenshot and return as PIL Image."""
+        # exec-out streams raw bytes directly (no temp file on device needed).
+        # The -p flag outputs PNG format.
         data = self._run_binary("exec-out", "screencap", "-p", timeout=10)
 
+        # A valid PNG is always >100 bytes; anything smaller means the capture failed
         if len(data) < 100:
             raise ADBError(f"Screenshot too small ({len(data)} bytes) — likely corrupt or empty")
 
@@ -169,7 +180,11 @@ class Device:
         self._run("shell", "input", "keyevent", "3")
 
     def input_text(self, text: str) -> None:
-        """Type text (spaces must be escaped for ADB)."""
+        """Type text (spaces must be escaped for ADB).
+
+        ADB's `input text` interprets %s as a space — literal spaces would be
+        treated as argument separators by the shell.
+        """
         escaped = text.replace(" ", "%s")
         self._run("shell", "input", "text", escaped)
 
@@ -180,11 +195,14 @@ class Device:
         except ADBError:
             return "unknown"
 
-        # Look for various activity indicators across Android versions
+        # Different Android versions use different field names for the
+        # foreground activity — check all known variants for compatibility
         indicators = ["topResumedActivity", "mResumedActivity", "mFocusedActivity", "mFocusedApp"]
         for line in result.stdout.splitlines():
             if any(ind in line for ind in indicators):
                 parts = line.strip().split()
+                # Activity names look like "com.example.app/.MainActivity" — they
+                # contain both "/" and "." which distinguishes them from other tokens
                 for part in parts:
                     if "/" in part and "." in part:
                         return part.rstrip("}")
@@ -203,7 +221,8 @@ class Device:
         """Launch an app by package name.
 
         Uses `am start` with the launcher intent. Falls back to `monkey` if
-        the main activity can't be resolved.
+        the main activity can't be resolved (e.g. some apps don't export their
+        main activity in a way resolve-activity can find).
         """
         try:
             self._run(
@@ -213,7 +232,8 @@ class Device:
                 "-n", self._resolve_main_activity(package),
             )
         except ADBError:
-            # Fallback: monkey command (exit code is unreliable, so use _run_lenient)
+            # Monkey sends a launcher intent without needing the activity name,
+            # but its exit code is unreliable so we don't check it
             self._run_lenient(
                 "shell", "monkey", "-p", package,
                 "-c", "android.intent.category.LAUNCHER", "1",
@@ -235,7 +255,12 @@ class Device:
         return self._exec(*args, timeout=timeout, strict=False)
 
     def get_ui_hierarchy(self) -> list[UIElement]:
-        """Dump and parse the UI hierarchy."""
+        """Dump and parse the UI hierarchy.
+
+        Uses uiautomator to dump the current view tree to an XML file on
+        the device, then reads it back. This gives us structured info about
+        every visible element (class, bounds, clickability, text, etc.).
+        """
         try:
             self._run("shell", "uiautomator", "dump", "/sdcard/ui_dump.xml")
             result = self._run("shell", "cat", "/sdcard/ui_dump.xml")

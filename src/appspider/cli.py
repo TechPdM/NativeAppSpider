@@ -51,7 +51,8 @@ def crawl(
 
     PACKAGE is the Android package name (e.g. com.example.app).
     """
-    # Validate prerequisites before starting
+    # Validate prerequisites before starting — fail fast with a clear message
+    # rather than crashing mid-crawl
     try:
         check_api_key()
     except RuntimeError as e:
@@ -116,6 +117,7 @@ def report(crawl_dir: Path) -> None:
 
     CRAWL_DIR is the path to a crawl output directory.
     """
+    # Verify the crawl directory has all the files we need to build a report
     required_files = ["screens.json", "transitions.json", "flow.mmd"]
     missing = [f for f in required_files if not (crawl_dir / f).exists()]
     if missing:
