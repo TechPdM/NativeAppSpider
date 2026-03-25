@@ -232,11 +232,15 @@ def test_is_package_installed_false():
         assert device.is_package_installed("com.example.app") is False
 
 
-def test_launch_app_raises_if_not_installed():
+def test_launch_app_falls_back_to_monkey():
+    """When am start fails (can't resolve activity), monkey fallback runs."""
     device = Device()
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr="",
+            args=[], returncode=1, stdout="", stderr="Error: not found",
         )
-        with pytest.raises(ADBError, match="not installed"):
-            device.launch_app("com.nonexistent.app")
+        # Should not raise — monkey fallback is lenient
+        device.launch_app("com.example.app")
+        # Verify monkey was called (last call)
+        last_call_args = mock_run.call_args_list[-1][0][0]
+        assert "monkey" in last_call_args

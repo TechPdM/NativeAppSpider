@@ -78,12 +78,8 @@ class Crawler:
 
     def crawl(self) -> CrawlState:
         """Run the main crawl loop."""
-        # Validate prerequisites
-        if not self.device.is_connected():
-            raise RuntimeError("No Android device connected. Start an emulator or connect a device.")
-
-        screen_w, screen_h = self.device.get_screen_size()
-        logger.info("Device screen: %dx%d", screen_w, screen_h)
+        self._screen_w, self._screen_h = self.device.get_screen_size()
+        logger.info("Device screen: %dx%d", self._screen_w, self._screen_h)
 
         # Set up output directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -122,10 +118,13 @@ class Crawler:
                 time.sleep(self.config.settle_delay)
                 continue
 
+            # Fetch clickable elements once per iteration (used by both analyze and decide)
+            clickable = self.device.get_clickable_elements()
+
             if is_new:
                 consecutive_known = 0
                 try:
-                    self._process_new_screen(screenshot, screen_id)
+                    self._process_new_screen(screenshot, screen_id, clickable)
                 except Exception as e:
                     logger.error("Failed to analyze screen: %s", e)
                     self._record_minimal_screen(screenshot, screen_id)
@@ -181,14 +180,14 @@ class Crawler:
 
             # Decide what to do next
             action = self._decide_action(
-                screenshot, screen_id, consecutive_known, screen_w, screen_h,
+                screenshot, screen_id, consecutive_known, clickable,
             )
 
             # Execute the action
             prev_screen = screen_id
             prev_action = action
             try:
-                self._execute_action(action, screen_w, screen_h)
+                self._execute_action(action)
             except ADBError as e:
                 logger.error("Action failed: %s", e)
 
@@ -213,6 +212,9 @@ class Crawler:
             return False  # Can't tell, assume we're still in the app
         return self.config.package not in activity
 
+    def _visited_screen_names(self) -> list[str]:
+        return [s.screen_name for s in self.state.screens.values()]
+
     def _capture_and_identify(self) -> tuple[Image.Image, str, bool]:
         """Capture screenshot, hash it, return (image, screen_id, is_new)."""
         screenshot = self.device.screenshot()
@@ -223,9 +225,10 @@ class Crawler:
             return screenshot, existing, False
         return screenshot, current_hash, True
 
-    def _process_new_screen(self, screenshot: Image.Image, screen_id: str) -> None:
+    def _process_new_screen(
+        self, screenshot: Image.Image, screen_id: str, clickable: list,
+    ) -> None:
         """Analyze and record a new screen."""
-        clickable = self.device.get_clickable_elements()
         ui_elements = [
             {"label": e.label, "bounds": e.bounds, "class": e.class_name}
             for e in clickable
@@ -235,7 +238,7 @@ class Crawler:
         analysis = self.analyzer.analyze_screen(
             screenshot,
             ui_elements=ui_elements,
-            visited_screens=[s.screen_name for s in self.state.screens.values()],
+            visited_screens=self._visited_screen_names(),
             current_path=self.state.current_path,
             avoid_flows=self.config.avoid_flows or None,
         )
@@ -278,8 +281,7 @@ class Crawler:
         screenshot: Image.Image,
         screen_id: str,
         consecutive_known: int,
-        screen_w: int,
-        screen_h: int,
+        clickable: list,
     ) -> NavigationAction:
         """Decide the next navigation action."""
         if consecutive_known > 5:
@@ -288,7 +290,6 @@ class Crawler:
             return NavigationAction(action="back", reason="max depth reached")
 
         try:
-            clickable = self.device.get_clickable_elements()
             elements_for_ai = [
                 {"label": e.label, "center": e.center, "class": e.class_name}
                 for e in clickable
@@ -297,7 +298,7 @@ class Crawler:
             action = self.analyzer.decide_next_action(
                 screenshot,
                 elements_for_ai,
-                [s.screen_name for s in self.state.screens.values()],
+                self._visited_screen_names(),
                 recent_actions=recent_actions,
                 target_package=self.config.package,
                 avoid_flows=self.config.avoid_flows or None,
@@ -310,15 +311,16 @@ class Crawler:
             logger.error("Navigation decision failed: %s", e)
             return NavigationAction(action="back", reason=f"decision error: {e}")
 
-    def _execute_action(self, action: NavigationAction, screen_w: int, screen_h: int) -> None:
+    def _execute_action(self, action: NavigationAction) -> None:
         """Execute a navigation action on the device."""
+        w, h = self._screen_w, self._screen_h
         match action.action:
             case "tap":
                 self.device.tap(action.x, action.y)
             case "swipe_up":
-                self.device.swipe(screen_w // 2, screen_h * 3 // 4, screen_w // 2, screen_h // 4)
+                self.device.swipe(w // 2, h * 3 // 4, w // 2, h // 4)
             case "swipe_down":
-                self.device.swipe(screen_w // 2, screen_h // 4, screen_w // 2, screen_h * 3 // 4)
+                self.device.swipe(w // 2, h // 4, w // 2, h * 3 // 4)
             case "back":
                 self.device.press_back()
             case "type":
@@ -366,8 +368,8 @@ class Crawler:
         # Save graph edges
         edges = []
         for u, v, data in self.state.graph.edges(data=True):
-            u_name = self.state.screens.get(u, ScreenNode(u, u[:8], "", "", [], "")).screen_name
-            v_name = self.state.screens.get(v, ScreenNode(v, v[:8], "", "", [], "")).screen_name
+            u_name = self.state.screens[u].screen_name if u in self.state.screens else u[:8]
+            v_name = self.state.screens[v].screen_name if v in self.state.screens else v[:8]
             edges.append({
                 "from": u_name,
                 "to": v_name,

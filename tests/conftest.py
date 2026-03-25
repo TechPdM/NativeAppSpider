@@ -41,11 +41,5 @@ def sample_image_similar() -> Image.Image:
 
 
 @pytest.fixture
-def sample_image_different() -> Image.Image:
-    """An image clearly different from sample_image."""
-    return Image.new("RGB", (100, 200), color=(255, 0, 0))
-
-
-@pytest.fixture
 def sample_ui_xml() -> str:
     return SAMPLE_UI_XML

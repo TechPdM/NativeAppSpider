@@ -60,37 +60,32 @@ class Device:
             self._adb_prefix = ["adb", "-s", serial]
         self._screen_size: tuple[int, int] | None = None
 
-    def _run(self, *args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-        """Run an ADB command and return the result. Raises ADBError on failure."""
+    def _exec(
+        self, *args: str, timeout: int = 30, binary: bool = False, strict: bool = True,
+    ) -> subprocess.CompletedProcess:
+        """Run an ADB command. Core method for all ADB interactions."""
         cmd = [*self._adb_prefix, *args]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(
+                cmd, capture_output=True, text=not binary, timeout=timeout,
+            )
         except subprocess.TimeoutExpired as e:
             raise ADBError(f"ADB command timed out after {timeout}s: {' '.join(cmd)}") from e
         except FileNotFoundError as e:
             raise ADBError("ADB not found on PATH. Install Android SDK Platform Tools.") from e
 
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            raise ADBError(f"ADB command failed (exit {result.returncode}): {' '.join(cmd)}\n{stderr}")
-
+        if strict and result.returncode != 0:
+            stderr = result.stderr if isinstance(result.stderr, str) else result.stderr.decode(errors="replace")
+            raise ADBError(
+                f"ADB command failed (exit {result.returncode}): {' '.join(cmd)}\n{stderr.strip()}"
+            )
         return result
 
+    def _run(self, *args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+        return self._exec(*args, timeout=timeout)
+
     def _run_binary(self, *args: str, timeout: int = 30) -> bytes:
-        """Run an ADB command and return raw binary stdout."""
-        cmd = [*self._adb_prefix, *args]
-        try:
-            result = subprocess.run(cmd, capture_output=True, timeout=timeout)
-        except subprocess.TimeoutExpired as e:
-            raise ADBError(f"ADB command timed out after {timeout}s: {' '.join(cmd)}") from e
-        except FileNotFoundError as e:
-            raise ADBError("ADB not found on PATH. Install Android SDK Platform Tools.") from e
-
-        if result.returncode != 0:
-            stderr = result.stderr.decode(errors="replace").strip()
-            raise ADBError(f"ADB command failed (exit {result.returncode}): {' '.join(cmd)}\n{stderr}")
-
-        return result.stdout
+        return self._exec(*args, timeout=timeout, binary=True).stdout
 
     def is_connected(self) -> bool:
         """Check if a device is connected and accessible."""
@@ -210,8 +205,6 @@ class Device:
         Uses `am start` with the launcher intent. Falls back to `monkey` if
         the main activity can't be resolved.
         """
-        if not self.is_package_installed(package):
-            raise ADBError(f"Package not installed: {package}")
         try:
             self._run(
                 "shell", "am", "start",
@@ -239,14 +232,7 @@ class Device:
         raise ADBError(f"Could not resolve main activity for {package}")
 
     def _run_lenient(self, *args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-        """Run an ADB command, ignoring non-zero exit codes."""
-        cmd = [*self._adb_prefix, *args]
-        try:
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired as e:
-            raise ADBError(f"ADB command timed out after {timeout}s: {' '.join(cmd)}") from e
-        except FileNotFoundError as e:
-            raise ADBError("ADB not found on PATH.") from e
+        return self._exec(*args, timeout=timeout, strict=False)
 
     def get_ui_hierarchy(self) -> list[UIElement]:
         """Dump and parse the UI hierarchy."""

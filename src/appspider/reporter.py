@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+from html import escape as html_escape
 from pathlib import Path
 
 
@@ -25,22 +26,29 @@ def generate_html_report(crawl_dir: Path) -> Path:
 
         elements_html = ""
         for el in screen.get("elements", []):
+            el_type = html_escape(str(el.get("type", "?")))
+            el_label = html_escape(str(el.get("label", "unnamed")))
+            el_purpose = html_escape(str(el.get("purpose", "")))
             elements_html += (
-                f'<li><span class="el-type">{el.get("type", "?")}</span> '
-                f'{el.get("label", "unnamed")} — {el.get("purpose", "")}</li>'
+                f'<li><span class="el-type">{el_type}</span> '
+                f'{el_label} — {el_purpose}</li>'
             )
+
+        name = html_escape(screen["screen_name"])
+        desc = html_escape(screen["description"])
+        activity = html_escape(screen.get("activity", "?"))
 
         cards.append(f"""
         <div class="screen-card">
             {img_tag}
             <div class="screen-info">
-                <h3>{screen["screen_name"]}</h3>
-                <p>{screen["description"]}</p>
+                <h3>{name}</h3>
+                <p>{desc}</p>
                 <details>
                     <summary>{len(screen.get("elements", []))} elements</summary>
                     <ul>{elements_html}</ul>
                 </details>
-                <p class="meta">Activity: {screen.get("activity", "?")}<br>
+                <p class="meta">Activity: {activity}<br>
                 Visited {screen.get("visit_count", 1)}x</p>
             </div>
         </div>""")

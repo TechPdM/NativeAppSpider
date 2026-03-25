@@ -166,10 +166,11 @@ class TestCrawler:
         screens = json.loads((state.output_dir / "screens.json").read_text())
         assert len(screens) == 1
 
-    def test_crawl_raises_if_not_connected(self, tmp_path):
+    def test_crawl_raises_if_device_unavailable(self, tmp_path):
+        from appspider.device import ADBError
         crawler, device, analyzer = self._make_crawler(tmp_path)
-        device.is_connected.return_value = False
-        with pytest.raises(RuntimeError, match="No Android device"):
+        device.get_screen_size.side_effect = ADBError("no device")
+        with pytest.raises(ADBError):
             crawler.crawl()
 
     def test_screenshot_failure_doesnt_crash(self, tmp_path):
