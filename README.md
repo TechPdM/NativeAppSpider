@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/AppSpiderBannerComp.png" width="600" alt="NativeAppSpider banner">
+</p>
+
 # NativeAppSpider
 
 Automated mobile app UI spider — crawls and documents screens, elements, and navigation flows. Works on any installed app, no source code access required.
