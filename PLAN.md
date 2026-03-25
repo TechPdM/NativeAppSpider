@@ -90,10 +90,13 @@ Results from first crawl (Settings app):
 **Goal:** Replay tests, edge case handling, robustness.
 
 **Replay integration tests:**
-- [ ] Capture fixture data from Phase 1 crawls (screenshots, UI dumps, API responses)
-- [ ] Build `MockDevice` and `MockAnalyzer` that replay fixture sequences
-- [ ] Run `Crawler` against mocks — assert graph structure, output files, screen count
-- [ ] This enables refactoring without a live device
+
+Test the full crawl pipeline end-to-end without a real device or API key. Record real crawl data (screenshots, UI dumps, Claude responses) as fixtures, then replay them through mock classes so the crawler runs against pre-recorded sequences. This lets us assert on overall behaviour (graph structure, screen count, output files) and refactor safely — unit tests verify components in isolation, replay tests verify they work together.
+
+- [x] Build `ReplayDevice` and `ReplayAnalyzer` that replay scripted sequences (`tests/integration/replay.py`)
+- [x] Run `Crawler` against replay mocks — 4 scenarios, 10 tests (`tests/integration/test_crawl_replay.py`): linear 3-screen crawl, single-screen app, app escape + relaunch, revisit counting + bidirectional transitions
+- [x] Refactoring is now safe without a live device (81 total tests, all passing)
+- [ ] Capture fixture data from real crawls (screenshots, UI dumps, API responses) for higher-fidelity replay tests
 
 **Edge cases:**
 - [ ] Handle system dialogs (permission prompts, "app not responding", keyboard)
