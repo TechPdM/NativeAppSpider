@@ -64,7 +64,7 @@ def generate_html_report(crawl_dir: Path) -> Path:
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>AppSpider Report</title>
+<title>NativeAppSpider Report</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
 <style>
   body {{ font-family: -apple-system, system-ui, sans-serif; margin: 2rem; background: #f5f5f5; color: #333; }}
@@ -85,7 +85,7 @@ def generate_html_report(crawl_dir: Path) -> Path:
 </style>
 </head>
 <body>
-<h1>AppSpider Report</h1>
+<h1>NativeAppSpider Report</h1>
 
 <div class="stats">
   <div class="stat"><div class="stat-num">{len(screens)}</div>Screens</div>

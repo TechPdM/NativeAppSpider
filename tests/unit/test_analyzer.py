@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from appspider.analyzer import (
+from nativeappspider.analyzer import (
     Analyzer,
     NavigationAction,
     ScreenAnalysis,

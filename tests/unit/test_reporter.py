@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from appspider.reporter import generate_html_report
+from nativeappspider.reporter import generate_html_report
 
 
 def _create_crawl_fixtures(tmp_path: Path) -> Path:

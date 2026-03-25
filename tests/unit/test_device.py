@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
-from appspider.device import ADBError, Device, UIElement, _parse_bounds
+from nativeappspider.device import ADBError, Device, UIElement, _parse_bounds
 
 
 # --- _parse_bounds ---

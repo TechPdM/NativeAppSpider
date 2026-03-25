@@ -1,4 +1,4 @@
-"""CLI entry point for AppSpider."""
+"""CLI entry point for NativeAppSpider."""
 
 from __future__ import annotations
 
@@ -8,16 +8,16 @@ from pathlib import Path
 
 import click
 
-from appspider.analyzer import check_api_key
-from appspider.crawler import CrawlConfig, Crawler
-from appspider.device import ADBError, Device
-from appspider.reporter import generate_html_report
+from nativeappspider.analyzer import check_api_key
+from nativeappspider.crawler import CrawlConfig, Crawler
+from nativeappspider.device import ADBError, Device
+from nativeappspider.reporter import generate_html_report
 
 
 @click.group()
 @click.option("-v", "--verbose", is_flag=True, help="Enable debug logging")
 def main(verbose: bool) -> None:
-    """AppSpider — automated mobile app UI crawler."""
+    """NativeAppSpider — automated mobile app UI crawler."""
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(levelname)s: %(message)s",

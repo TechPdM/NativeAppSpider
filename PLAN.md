@@ -1,8 +1,8 @@
-# AppSpider Development Plan
+# NativeAppSpider Development Plan
 
 ## Current Status
 
-**Phase 1 is complete.** All bug fixes, error handling, unit tests, real-device crawls, and prompt tuning are done. The tool has been validated against 4 apps (Settings, Clock, Contacts, Zapmap) with consistent results. Ready for Phase 2 hardening.
+**Phase 1 is complete.** All bug fixes, error handling, unit tests, real-device crawls, and prompt tuning are done. The tool has been validated against 4 apps (Settings, Clock, Contacts, and a third-party app) with consistent results. Ready for Phase 2 hardening.
 
 | Component | Status | Notes |
 |---|---|---|
@@ -16,7 +16,7 @@
 | Reporter (`reporter.py`) | Done | HTML generation with Mermaid, self-contained output |
 | Tests | Done | 71 unit tests, all passing (~1.8s), fully mocked |
 | Android environment | Done | Homebrew CLI setup, AVD `appspider_test` (Android 14, arm64) |
-| Real crawls | Done | Settings (10), Clock (15), Contacts (15), Zapmap (17) |
+| Real crawls | Done | Settings (10), Clock (15), Contacts (15), third-party app (17) |
 
 ### Known Limitations
 

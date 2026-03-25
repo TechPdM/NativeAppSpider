@@ -1,4 +1,4 @@
-# AppSpider
+# NativeAppSpider
 
 A proof-of-concept tool that automatically crawls mobile app UIs and documents screens, elements, and navigation flows.
 
@@ -21,7 +21,7 @@ A proof-of-concept tool that automatically crawls mobile app UIs and documents s
 ## Project Structure
 
 ```
-src/appspider/
+src/nativeappspider/
   __init__.py
   cli.py          # CLI entry point
   crawler.py      # Main crawl loop and state graph
@@ -34,8 +34,8 @@ src/appspider/
 ## Commands
 
 ```bash
-uv run appspider crawl <package-name>   # Crawl an app
-uv run appspider report <crawl-dir>     # Generate report from crawl data
+uv run nativeappspider crawl <package-name>   # Crawl an app
+uv run nativeappspider report <crawl-dir>     # Generate report from crawl data
 ```
 
 ## Dev Commands

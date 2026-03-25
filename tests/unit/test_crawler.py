@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
-from appspider.analyzer import NavigationAction, ScreenAnalysis
-from appspider.crawler import CrawlConfig, CrawlState, Crawler, ScreenNode
-from appspider.hasher import screen_hash
+from nativeappspider.analyzer import NavigationAction, ScreenAnalysis
+from nativeappspider.crawler import CrawlConfig, CrawlState, Crawler, ScreenNode
+from nativeappspider.hasher import screen_hash
 
 
 def _make_image(color: tuple[int, int, int] = (128, 128, 128)) -> Image.Image:
@@ -62,7 +62,7 @@ class TestCrawler:
         device.current_activity.return_value = "com.test.app/.MainActivity"
 
         # Mock Analyzer construction to skip API key check
-        with patch("appspider.crawler.Analyzer") as MockAnalyzer:
+        with patch("nativeappspider.crawler.Analyzer") as MockAnalyzer:
             analyzer = MockAnalyzer.return_value
             crawler = Crawler(config, device)
             crawler.analyzer = analyzer
@@ -167,7 +167,7 @@ class TestCrawler:
         assert len(screens) == 1
 
     def test_crawl_raises_if_device_unavailable(self, tmp_path):
-        from appspider.device import ADBError
+        from nativeappspider.device import ADBError
         crawler, device, analyzer = self._make_crawler(tmp_path)
         device.get_screen_size.side_effect = ADBError("no device")
         with pytest.raises(ADBError):
@@ -175,7 +175,7 @@ class TestCrawler:
 
     def test_screenshot_failure_doesnt_crash(self, tmp_path):
         """ADB errors during screenshot should be caught, not crash the crawl."""
-        from appspider.device import ADBError
+        from nativeappspider.device import ADBError
 
         crawler, device, analyzer = self._make_crawler(tmp_path, max_actions=3)
 

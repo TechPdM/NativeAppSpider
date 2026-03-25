@@ -12,9 +12,9 @@ from pathlib import Path
 import networkx as nx
 from PIL import Image
 
-from appspider.analyzer import Analyzer, NavigationAction, ScreenAnalysis
-from appspider.device import ADBError, Device
-from appspider.hasher import are_similar, screen_hash
+from nativeappspider.analyzer import Analyzer, NavigationAction, ScreenAnalysis
+from nativeappspider.device import ADBError, Device
+from nativeappspider.hasher import are_similar, screen_hash
 
 logger = logging.getLogger(__name__)
 

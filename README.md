@@ -1,4 +1,4 @@
-# AppSpider
+# NativeAppSpider
 
 Automated mobile app UI spider — crawls and documents screens, elements, and navigation flows. Works on any installed app, no source code access required.
 
@@ -10,10 +10,10 @@ pip install -e .
 
 # Crawl an app (requires Android emulator with ADB)
 export ANTHROPIC_API_KEY=your-key
-appspider crawl com.example.app
+nativeappspider crawl com.example.app
 
 # Generate report from existing crawl
-appspider report output/com.example.app_20240101_120000/
+nativeappspider report output/com.example.app_20240101_120000/
 ```
 
 ## Requirements
@@ -83,25 +83,25 @@ adb shell ping google.com  # Should resolve and get responses (verifies DNS)
 
 ```bash
 # Basic crawl
-appspider crawl com.example.app
+nativeappspider crawl com.example.app
 
 # Limit scope
-appspider crawl com.example.app --max-screens 20 --max-actions 50
+nativeappspider crawl com.example.app --max-screens 20 --max-actions 50
 
 # Target a specific device
-appspider crawl com.example.app --serial emulator-5554
+nativeappspider crawl com.example.app --serial emulator-5554
 
 # Fresh start (clears app data so it launches from the initial screen)
-appspider crawl com.example.app --fresh
+nativeappspider crawl com.example.app --fresh
 
 # Skip specific flows (e.g. avoid registration/login during exploration)
-appspider crawl com.example.app --avoid registration --avoid login --avoid "sign up"
+nativeappspider crawl com.example.app --avoid registration --avoid login --avoid "sign up"
 
 # Verbose logging
-appspider -v crawl com.example.app
+nativeappspider -v crawl com.example.app
 
 # Regenerate report from previous crawl data
-appspider report output/com.example.app_20240101_120000/
+nativeappspider report output/com.example.app_20240101_120000/
 ```
 
 ## Output

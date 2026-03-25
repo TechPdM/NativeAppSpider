@@ -1,8 +1,8 @@
-# AppSpider Architecture
+# NativeAppSpider Architecture
 
 ## Overview
 
-AppSpider is an automated mobile app UI crawler. It connects to an Android device or emulator, systematically navigates through an app's screens, and produces structured documentation of every screen, element, and transition it discovers.
+NativeAppSpider is an automated mobile app UI crawler. It connects to an Android device or emulator, systematically navigates through an app's screens, and produces structured documentation of every screen, element, and transition it discovers.
 
 The core idea: treat an app's UI as a **directed graph** where screens are nodes and user actions are edges, then explore that graph using an AI-guided breadth-first strategy.
 
@@ -157,8 +157,8 @@ The report has zero external dependencies besides a CDN-loaded Mermaid.js — it
 Built with Click. Two commands:
 
 ```
-appspider crawl <package> [options]   # Run a crawl
-appspider report <crawl-dir>          # Regenerate report from saved data
+nativeappspider crawl <package> [options]   # Run a crawl
+nativeappspider report <crawl-dir>          # Regenerate report from saved data
 ```
 
 The `crawl` command auto-generates a report after the crawl completes.
@@ -215,7 +215,7 @@ This model naturally represents:
 
 ## Black-Box Approach
 
-AppSpider requires **no access to app source code**. It works on any app installed on a connected device or emulator, the same way a human tester would — by looking at the screen and tapping.
+NativeAppSpider requires **no access to app source code**. It works on any app installed on a connected device or emulator, the same way a human tester would — by looking at the screen and tapping.
 
 **Why this works without source code:**
 - **ADB** operates at the OS level — screenshots, taps, and UI hierarchy dumps work on any app regardless of who built it

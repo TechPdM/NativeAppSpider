@@ -2,7 +2,7 @@
 
 from PIL import Image
 
-from appspider.hasher import are_similar, screen_hash
+from nativeappspider.hasher import are_similar, screen_hash
 
 
 def test_same_image_produces_same_hash(sample_image):
