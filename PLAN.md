@@ -110,6 +110,13 @@ Results from first crawl (Settings app):
 - [ ] Add `--live` flag for unbuffered console output so progress is visible in real time when running in foreground
 - [ ] Add `--fresh` flag to run `adb shell pm clear <package>` before launch, ensuring app starts from its initial screen
 
+**Code quality (deferred from /simplify review):**
+- [ ] Action type enum — replace raw strings ("tap", "swipe_up", etc.) with a `StrEnum`, currently checked in three places (analyzer, crawler match, tests)
+- [ ] Cache base64 screenshot encoding — same screenshot is PNG-compressed twice per new screen (once for analyze, once for decide). Cache the encoded string.
+- [ ] `CrawlContext` dataclass — group shared parameters (`visited_screens`, `current_path`, `avoid_flows`) into a single object instead of passing individually to analyzer methods
+- [ ] Store `ImageHash` objects instead of hex strings in `CrawlState.screens` — avoids repeated `hex_to_hash()` parsing in `find_matching_screen()` O(n) loop
+- [ ] Use reporter TOCTOU fix — try/except on `read_bytes()` instead of `exists()` check before read
+
 **E2E smoke test:**
 - [ ] `test_live_crawl.py` — crawl Settings with `max_screens=5`, assert >1 screen found
 - [ ] Marked `@pytest.mark.e2e`, excluded from default test runs
