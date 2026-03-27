@@ -1,0 +1,11 @@
+# NativeAppSpider config for Zapmap
+package: com.zapmap.zapmap
+max_screens: 10
+max_actions: 60
+fresh: true
+focus: map
+scroll_discovery: false
+avoid:
+  - registration
+  - login
+  - onboarding

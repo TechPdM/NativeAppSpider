@@ -10,6 +10,7 @@ dependencies = [
     "Pillow>=11.0",
     "networkx>=3.4",
     "imagehash>=4.3",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
