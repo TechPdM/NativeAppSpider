@@ -104,6 +104,7 @@ class Analyzer:
         visited_screens: list[str] | None = None,
         current_path: list[str] | None = None,
         avoid_flows: list[str] | None = None,
+        dismiss_flows: list[str] | None = None,
         focus_screen: str | None = None,
     ) -> ScreenAnalysis:
         """Analyze a screenshot and return structured screen documentation."""
@@ -125,6 +126,11 @@ class Analyzer:
             context_parts.append(
                 f"AVOIDED FLOWS: The following flows should be skipped: {', '.join(avoid_flows)}. "
                 f"Note in the description if this screen is part of an avoided flow."
+            )
+        if dismiss_flows:
+            context_parts.append(
+                f"DISMISS SCREENS: If this screen relates to any of these: {', '.join(dismiss_flows)}, "
+                f"note it in the description. These screens should be dismissed quickly, not explored."
             )
         if focus_screen:
             context_parts.append(
@@ -215,6 +221,7 @@ Return ONLY valid JSON, no markdown fences.""",
         recent_actions: list[str] | None = None,
         target_package: str | None = None,
         avoid_flows: list[str] | None = None,
+        dismiss_flows: list[str] | None = None,
         focus_screen: str | None = None,
     ) -> NavigationAction:
         """Decide which action to take next to maximize exploration coverage."""
@@ -233,6 +240,12 @@ Return ONLY valid JSON, no markdown fences.""",
             context_parts.append(
                 f"AVOID these flows — do NOT tap elements that lead into: {', '.join(avoid_flows)}. "
                 f"If the current screen is part of an avoided flow, use \"back\" immediately."
+            )
+        if dismiss_flows:
+            context_parts.append(
+                f"DISMISS QUICKLY: If this screen relates to any of these: {', '.join(dismiss_flows)}, "
+                f"tap the most obvious accept/ok/continue/dismiss button to get past it. "
+                f"Do NOT explore these screens — just dismiss and move on."
             )
         if focus_screen:
             context_parts.append(

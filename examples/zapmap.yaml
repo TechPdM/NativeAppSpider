@@ -9,3 +9,7 @@ avoid:
   - registration
   - login
   - onboarding
+dismiss:
+  - consent
+  - privacy
+  - cookie

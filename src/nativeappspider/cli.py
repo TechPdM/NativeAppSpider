@@ -77,6 +77,7 @@ def main(verbose: bool) -> None:
 @click.option("--model", default=None, help="Claude model to use (e.g. claude-sonnet-4-5-20241022)")
 @click.option("--fresh", is_flag=True, help="Clear app data before crawling (starts from initial screen)")
 @click.option("--avoid", multiple=True, help="Flows to avoid, e.g. --avoid registration --avoid login")
+@click.option("--dismiss", multiple=True, help="Screens to dismiss quickly, e.g. --dismiss consent --dismiss privacy")
 @click.option("--focus", default=None, help="Navigate to this screen first, then explore from there")
 @click.option("--scroll-discovery/--no-scroll-discovery", default=True,
               help="Scroll containers to find off-screen elements")
@@ -94,6 +95,7 @@ def crawl(
     model: str | None,
     fresh: bool,
     avoid: tuple[str, ...],
+    dismiss: tuple[str, ...],
     focus: str | None,
     scroll_discovery: bool,
 ) -> None:
@@ -116,6 +118,7 @@ def crawl(
             "model": model,
             "fresh": fresh,
             "avoid": avoid,
+            "dismiss": dismiss,
             "focus": focus,
             "scroll_discovery": scroll_discovery,
         }
@@ -132,9 +135,11 @@ def crawl(
         fresh = merged.get("fresh", False)
         focus = merged.get("focus")
         scroll_discovery = merged.get("scroll_discovery", True)
-        # avoid can be a list in YAML or a tuple from CLI
+        # avoid/dismiss can be a list in YAML or a tuple from CLI
         avoid_raw = merged.get("avoid", ())
         avoid = tuple(avoid_raw) if isinstance(avoid_raw, list) else avoid_raw
+        dismiss_raw = merged.get("dismiss", ())
+        dismiss = tuple(dismiss_raw) if isinstance(dismiss_raw, list) else dismiss_raw
 
     if not package:
         click.echo("Error: PACKAGE is required (provide as argument or in config file)", err=True)
@@ -169,6 +174,8 @@ def crawl(
 
     if avoid:
         click.echo(f"Avoiding flows: {', '.join(avoid)}")
+    if dismiss:
+        click.echo(f"Dismissing screens: {', '.join(dismiss)}")
     if focus:
         click.echo(f"Focusing on: {focus}")
 
@@ -180,6 +187,7 @@ def crawl(
         output_dir=output,
         settle_delay=delay,
         avoid_flows=list(avoid),
+        dismiss_flows=list(dismiss),
         focus_screen=focus,
         scroll_discovery=scroll_discovery,
     )

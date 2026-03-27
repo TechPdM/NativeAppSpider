@@ -62,6 +62,7 @@ class CrawlConfig:
     output_dir: str = "output"
     hash_threshold: int = 12
     avoid_flows: list[str] = field(default_factory=list)
+    dismiss_flows: list[str] = field(default_factory=list)
     focus_screen: str | None = None
     scroll_discovery: bool = True
 
@@ -387,6 +388,7 @@ class Crawler:
             visited_screens=self._visited_screen_names(),
             current_path=self.state.current_path,
             avoid_flows=self.config.avoid_flows or None,
+            dismiss_flows=self.config.dismiss_flows or None,
             focus_screen=active_focus,
         )
 
@@ -477,6 +479,7 @@ class Crawler:
                 recent_actions=recent_actions,
                 target_package=self.config.package,
                 avoid_flows=self.config.avoid_flows or None,
+                dismiss_flows=self.config.dismiss_flows or None,
                 focus_screen=active_focus,
             )
             # Record what we did on this screen so Claude won't suggest the
