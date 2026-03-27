@@ -35,6 +35,30 @@ DIALOG_DISMISS_LABELS = frozenset({
     "only this time", "don't allow", "don\u2019t allow",
 })
 
+# Package prefixes and resource ID patterns that indicate ad elements.
+# These regions are masked before hashing so rotating ads don't make the
+# same screen look like a new one.
+AD_PACKAGE_PREFIXES = (
+    "com.google.android.gms.ads",
+    "com.google.android.gms.ad",
+    "com.facebook.ads",
+    "com.applovin",
+    "com.unity3d.ads",
+    "com.ironsource",
+    "com.mopub",
+    "com.inmobi",
+    "com.chartboost",
+    "com.vungle",
+    "com.adcolony",
+)
+
+AD_RESOURCE_ID_PATTERNS = (
+    "ad_view", "adview", "ad_banner", "adbanner", "ad_container",
+    "adcontainer", "banner_ad", "bannerad", "interstitial",
+    "native_ad", "nativead", "ad_frame", "adframe",
+    "google_ads", "admob",
+)
+
 
 @dataclass
 class ScreenNode:
@@ -159,12 +183,20 @@ class Crawler:
                 consecutive_known = 0
                 try:
                     # Send the screenshot to Claude for analysis and documentation
-                    self._process_new_screen(screenshot, screen_id, clickable)
+                    recorded = self._process_new_screen(screenshot, screen_id, clickable)
                 except Exception as e:
                     # If Claude fails (network, parsing, etc.), still record the
                     # screen so we don't keep trying to analyze it on revisits
                     logger.error("Failed to analyze screen: %s", e)
                     self._record_minimal_screen(screenshot, screen_id)
+                    recorded = True
+
+                # If the screen was avoided, press back and skip to next iteration
+                if not recorded:
+                    self.device.press_back()
+                    self.state.action_count += 1
+                    time.sleep(self.config.settle_delay)
+                    continue
 
                 # Scroll through any scrollable containers to discover
                 # off-screen elements that aren't visible in the initial viewport
@@ -357,20 +389,87 @@ class Crawler:
     def _visited_screen_names(self) -> list[str]:
         return [s.screen_name for s in self.state.screens.values()]
 
+    def _mask_ad_regions(self, screenshot: Image.Image) -> Image.Image:
+        """Return a copy of the screenshot with ad regions painted over.
+
+        Checks the UI hierarchy for elements belonging to known ad SDK
+        packages or with ad-related resource IDs. Paints a solid grey
+        rectangle over each match so the perceptual hash ignores them.
+        Only copies the image if ads are actually found.
+        """
+        try:
+            hierarchy = self.device.get_ui_hierarchy()
+        except ADBError:
+            return screenshot
+
+        ad_bounds = []
+        for e in hierarchy:
+            is_ad = False
+            # Check package name against known ad SDKs
+            if e.package:
+                pkg_lower = e.package.lower()
+                if any(pkg_lower.startswith(prefix) for prefix in AD_PACKAGE_PREFIXES):
+                    is_ad = True
+            # Check resource ID for ad-related patterns
+            if not is_ad and e.resource_id:
+                rid_lower = e.resource_id.lower()
+                if any(pat in rid_lower for pat in AD_RESOURCE_ID_PATTERNS):
+                    is_ad = True
+
+            if is_ad:
+                x1, y1, x2, y2 = e.bounds
+                if x2 > x1 and y2 > y1:  # valid non-zero bounds
+                    ad_bounds.append((x1, y1, x2, y2))
+
+        if not ad_bounds:
+            return screenshot
+
+        # Copy and mask — fill ad regions with solid grey
+        from PIL import ImageDraw
+        masked = screenshot.copy()
+        draw = ImageDraw.Draw(masked)
+        for bounds in ad_bounds:
+            draw.rectangle(bounds, fill=(128, 128, 128))
+        logger.debug("Masked %d ad region(s) before hashing", len(ad_bounds))
+        return masked
+
     def _capture_and_identify(self) -> tuple[Image.Image, str, bool]:
-        """Capture screenshot, hash it, return (image, screen_id, is_new)."""
+        """Capture screenshot, hash it, return (image, screen_id, is_new).
+
+        Before hashing, masks ad regions in the screenshot so that rotating
+        ads don't cause the same screen to be treated as a new one.
+        """
         screenshot = self.device.screenshot()
-        current_hash = screen_hash(screenshot)
+
+        # Mask ad regions so they don't affect the perceptual hash
+        hash_image = self._mask_ad_regions(screenshot)
+        current_hash = screen_hash(hash_image)
 
         existing = self.state.find_matching_screen(current_hash, self.config.hash_threshold)
         if existing:
             return screenshot, existing, False
         return screenshot, current_hash, True
 
+    def _is_avoided_screen(self, analysis: ScreenAnalysis) -> bool:
+        """Check if a screen matches any of the avoid flows."""
+        if not self.config.avoid_flows:
+            return False
+        name_lower = analysis.screen_name.lower()
+        desc_lower = analysis.description.lower()
+        for flow in self.config.avoid_flows:
+            flow_lower = flow.lower()
+            if flow_lower in name_lower or flow_lower in desc_lower:
+                return True
+        return False
+
     def _process_new_screen(
         self, screenshot: Image.Image, screen_id: str, clickable: list,
-    ) -> None:
-        """Analyze and record a new screen."""
+    ) -> bool:
+        """Analyze and record a new screen.
+
+        Returns True if the screen was recorded, False if it was skipped
+        because it matches an avoided flow.
+        """
         ui_elements = [
             {"label": e.label, "bounds": e.bounds, "class": e.class_name}
             for e in clickable
@@ -392,6 +491,11 @@ class Crawler:
             focus_screen=active_focus,
         )
 
+        # Skip recording screens that match avoided flows
+        if self._is_avoided_screen(analysis):
+            print(f"  [avoid] Skipping screen: {analysis.screen_name}")
+            return False
+
         # Check if this screen matches the focus target
         if (
             self.config.focus_screen
@@ -403,6 +507,7 @@ class Crawler:
 
         self._record_screen(screenshot, screen_id, analysis)
         print(f"         → {analysis.screen_name}: {analysis.description[:80]}")
+        return True
 
     def _record_screen(
         self, screenshot: Image.Image, screen_id: str, analysis: ScreenAnalysis,
