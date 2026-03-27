@@ -101,6 +101,12 @@ nativeappspider crawl com.example.app --fresh
 # Skip specific flows (e.g. avoid registration/login during exploration)
 nativeappspider crawl com.example.app --avoid registration --avoid login --avoid "sign up"
 
+# Navigate to a specific screen first, then explore from there
+nativeappspider crawl com.example.app --focus map
+
+# Combine focus and avoid for targeted crawling
+nativeappspider crawl com.example.app --focus settings --avoid login --avoid registration
+
 # Verbose logging
 nativeappspider -v crawl com.example.app
 

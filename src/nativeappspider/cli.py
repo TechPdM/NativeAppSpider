@@ -7,11 +7,51 @@ import sys
 from pathlib import Path
 
 import click
+import yaml
 
 from nativeappspider.analyzer import check_api_key
 from nativeappspider.crawler import CrawlConfig, Crawler
 from nativeappspider.device import ADBError, Device
 from nativeappspider.reporter import generate_html_report
+
+
+def _load_config_file(path: str) -> dict:
+    """Load a YAML config file and return its contents as a dict."""
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f)
+    except FileNotFoundError:
+        click.echo(f"Error: Config file not found: {path}", err=True)
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        click.echo(f"Error: Invalid YAML in {path}: {e}", err=True)
+        sys.exit(1)
+
+    if not isinstance(data, dict):
+        click.echo(f"Error: Config file must be a YAML mapping, got {type(data).__name__}", err=True)
+        sys.exit(1)
+
+    return data
+
+
+def _merge_config(cli_params: dict, ctx: click.Context, config_data: dict) -> dict:
+    """Merge config file values with CLI params. CLI args take priority.
+
+    A CLI param overrides the config file only if the user explicitly
+    provided it on the command line (i.e. it's not just the default).
+    """
+    merged = dict(config_data)
+
+    for key, value in cli_params.items():
+        # Check if this param was explicitly passed on the CLI
+        source = ctx.get_parameter_source(key)
+        if source == click.core.ParameterSource.COMMANDLINE:
+            merged[key] = value
+        elif key not in merged:
+            # Not in config file either — use the CLI default
+            merged[key] = value
+
+    return merged
 
 
 @click.group()
@@ -25,7 +65,9 @@ def main(verbose: bool) -> None:
 
 
 @main.command()
-@click.argument("package")
+@click.argument("package", required=False, default=None)
+@click.option("--config", "config_file", default=None, type=click.Path(),
+              help="YAML config file (CLI args override file values)")
 @click.option("--max-screens", default=50, help="Maximum unique screens to discover")
 @click.option("--max-actions", default=200, help="Maximum actions to take")
 @click.option("--max-depth", default=10, help="Maximum navigation depth before backtracking")
@@ -35,8 +77,14 @@ def main(verbose: bool) -> None:
 @click.option("--model", default=None, help="Claude model to use (e.g. claude-sonnet-4-5-20241022)")
 @click.option("--fresh", is_flag=True, help="Clear app data before crawling (starts from initial screen)")
 @click.option("--avoid", multiple=True, help="Flows to avoid, e.g. --avoid registration --avoid login")
+@click.option("--focus", default=None, help="Navigate to this screen first, then explore from there")
+@click.option("--scroll-discovery/--no-scroll-discovery", default=True,
+              help="Scroll containers to find off-screen elements")
+@click.pass_context
 def crawl(
-    package: str,
+    ctx: click.Context,
+    package: str | None,
+    config_file: str | None,
     max_screens: int,
     max_actions: int,
     max_depth: int,
@@ -46,11 +94,52 @@ def crawl(
     model: str | None,
     fresh: bool,
     avoid: tuple[str, ...],
+    focus: str | None,
+    scroll_discovery: bool,
 ) -> None:
     """Crawl an app's UI and document all screens and flows.
 
     PACKAGE is the Android package name (e.g. com.example.app).
+    Can also be specified in the config file.
     """
+    # Load config file if provided, then merge with CLI args
+    if config_file:
+        config_data = _load_config_file(config_file)
+        cli_params = {
+            "package": package,
+            "max_screens": max_screens,
+            "max_actions": max_actions,
+            "max_depth": max_depth,
+            "output": output,
+            "serial": serial,
+            "delay": delay,
+            "model": model,
+            "fresh": fresh,
+            "avoid": avoid,
+            "focus": focus,
+            "scroll_discovery": scroll_discovery,
+        }
+        merged = _merge_config(cli_params, ctx, config_data)
+
+        package = merged.get("package")
+        max_screens = merged.get("max_screens", 50)
+        max_actions = merged.get("max_actions", 200)
+        max_depth = merged.get("max_depth", 10)
+        output = merged.get("output", "output")
+        serial = merged.get("serial")
+        delay = merged.get("delay", 1.5)
+        model = merged.get("model")
+        fresh = merged.get("fresh", False)
+        focus = merged.get("focus")
+        scroll_discovery = merged.get("scroll_discovery", True)
+        # avoid can be a list in YAML or a tuple from CLI
+        avoid_raw = merged.get("avoid", ())
+        avoid = tuple(avoid_raw) if isinstance(avoid_raw, list) else avoid_raw
+
+    if not package:
+        click.echo("Error: PACKAGE is required (provide as argument or in config file)", err=True)
+        sys.exit(1)
+
     # Validate prerequisites before starting — fail fast with a clear message
     # rather than crashing mid-crawl
     try:
@@ -80,6 +169,8 @@ def crawl(
 
     if avoid:
         click.echo(f"Avoiding flows: {', '.join(avoid)}")
+    if focus:
+        click.echo(f"Focusing on: {focus}")
 
     config = CrawlConfig(
         package=package,
@@ -89,6 +180,8 @@ def crawl(
         output_dir=output,
         settle_delay=delay,
         avoid_flows=list(avoid),
+        focus_screen=focus,
+        scroll_discovery=scroll_discovery,
     )
 
     try:
