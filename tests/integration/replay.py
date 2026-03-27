@@ -27,6 +27,9 @@ class DeviceStep:
     screenshot: Image.Image
     clickable: list[UIElement] = field(default_factory=list)
     activity: str = "com.test.app/.MainActivity"
+    # Optional full UI hierarchy (including non-clickable and system elements).
+    # When set, get_ui_hierarchy() returns this instead of clickable.
+    ui_hierarchy: list[UIElement] | None = None
 
 
 class ReplayDevice:
@@ -62,7 +65,10 @@ class ReplayDevice:
         return step.clickable
 
     def get_ui_hierarchy(self) -> list[UIElement]:
-        return self.get_clickable_elements()
+        step = self._current_step()
+        if step.ui_hierarchy is not None:
+            return step.ui_hierarchy
+        return step.clickable
 
     def current_activity(self) -> str:
         step = self._current_step()

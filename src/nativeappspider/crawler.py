@@ -18,6 +18,23 @@ from nativeappspider.hasher import are_similar, screen_hash
 
 logger = logging.getLogger(__name__)
 
+# Packages that indicate a system dialog overlay rather than app content.
+# When elements from these packages appear, auto-dismiss instead of analyzing.
+SYSTEM_DIALOG_PACKAGES = frozenset({
+    "com.android.packageinstaller",
+    "com.android.permissioncontroller",
+    "com.google.android.permissioncontroller",
+    "android",
+    "com.android.systemui",
+})
+
+# Button labels commonly found on system dialogs — matched case-insensitively.
+DIALOG_DISMISS_LABELS = frozenset({
+    "allow", "ok", "deny", "dismiss", "cancel", "close",
+    "got it", "continue", "not now", "skip", "while using the app",
+    "only this time", "don't allow", "don\u2019t allow",
+})
+
 
 @dataclass
 class ScreenNode:
@@ -45,6 +62,8 @@ class CrawlConfig:
     output_dir: str = "output"
     hash_threshold: int = 12
     avoid_flows: list[str] = field(default_factory=list)
+    focus_screen: str | None = None
+    scroll_discovery: bool = True
 
 
 @dataclass
@@ -58,6 +77,11 @@ class CrawlState:
     output_dir: Path = field(default_factory=lambda: Path("output"))
     # Track actions tried per screen to avoid repeating them
     screen_actions: dict[str, list[str]] = field(default_factory=dict)
+    focus_reached: bool = False
+    # Track which specific elements have been tapped per screen, using
+    # (bounds, label) tuples as structural identifiers. This enables precise
+    # "all elements explored" detection without relying on Claude.
+    screen_tapped_elements: dict[str, set[tuple]] = field(default_factory=dict)
 
     def find_matching_screen(self, hash_val: str, threshold: int = 12) -> str | None:
         """Find an existing screen that matches the given hash."""
@@ -120,6 +144,12 @@ class Crawler:
                 time.sleep(self.config.settle_delay)
                 continue
 
+            # Check for system dialog overlays (permission prompts, ANR, etc.)
+            # before processing the screen — dismiss and re-loop if found
+            if self._detect_and_dismiss_dialog():
+                self.state.action_count += 1
+                continue
+
             # Fetch clickable elements once per iteration — reused by both the
             # screen analyzer (to document elements) and the action decider
             clickable = self.device.get_clickable_elements()
@@ -134,6 +164,11 @@ class Crawler:
                     # screen so we don't keep trying to analyze it on revisits
                     logger.error("Failed to analyze screen: %s", e)
                     self._record_minimal_screen(screenshot, screen_id)
+
+                # Scroll through any scrollable containers to discover
+                # off-screen elements that aren't visible in the initial viewport
+                if self.config.scroll_discovery:
+                    clickable = self._discover_scrollable_elements(screen_id, clickable)
             else:
                 self.state.screens[screen_id].visit_count += 1
                 consecutive_known += 1
@@ -207,6 +242,11 @@ class Crawler:
             self.state.action_count += 1
             print(f"  [{self.state.action_count}] {action.action} → {action.reason}")
 
+            # Record which element was tapped so the per-element loop
+            # detector knows this element has been tried on this screen
+            if action.action == "tap":
+                self._record_tapped_element(screen_id, action, clickable)
+
             time.sleep(self.config.settle_delay)
 
             # Pressing back pops the navigation stack so our depth tracking
@@ -219,6 +259,92 @@ class Crawler:
         print(f"\nCrawl complete: {len(self.state.screens)} screens, "
               f"{self.state.action_count} actions")
         return self.state
+
+    def _detect_and_dismiss_dialog(self) -> bool:
+        """Check for system dialog overlays and auto-dismiss them.
+
+        System dialogs (permission prompts, ANR, etc.) sit on top of the
+        target activity without changing it. We detect them by checking
+        element package names against known system packages, then tap a
+        dismiss button or press back.
+
+        Returns True if a dialog was detected and dismissed.
+        """
+        try:
+            hierarchy = self.device.get_ui_hierarchy()
+        except ADBError:
+            return False
+
+        # Check if any element belongs to a system dialog package
+        dialog_elements = [e for e in hierarchy if e.package in SYSTEM_DIALOG_PACKAGES]
+        if not dialog_elements:
+            return False
+
+        print("  [dialog] System dialog detected, auto-dismissing...")
+
+        # Look for a clickable dismiss button
+        for e in dialog_elements:
+            if not e.clickable or not e.enabled:
+                continue
+            label = (e.text or e.content_desc).lower()
+            if label in DIALOG_DISMISS_LABELS:
+                cx, cy = e.center
+                self.device.tap(cx, cy)
+                time.sleep(self.config.settle_delay)
+                return True
+
+        # No recognizable button found — press back to dismiss
+        self.device.press_back()
+        time.sleep(self.config.settle_delay)
+        return True
+
+    def _discover_scrollable_elements(
+        self, screen_id: str, initial_clickable: list,
+    ) -> list:
+        """Scroll through scrollable containers to reveal off-screen elements.
+
+        After a new screen is processed, checks for scrollable containers in the
+        UI hierarchy. For each one, scrolls within its bounds and re-fetches
+        the element list to discover elements that were below the fold.
+
+        Returns the combined list of all discovered clickable elements.
+        """
+        MAX_SCROLLS_PER_CONTAINER = 5
+
+        hierarchy = self.device.get_ui_hierarchy()
+        scrollable = [e for e in hierarchy if e.scrollable]
+        if not scrollable:
+            return initial_clickable
+
+        # Track all known elements by structural key
+        known_keys = {(e.bounds, e.label) for e in initial_clickable}
+        all_elements = list(initial_clickable)
+
+        for container in scrollable:
+            x1, y1, x2, y2 = container.bounds
+            cx = (x1 + x2) // 2
+            # Swipe within the container: from 75% to 25% of its height
+            swipe_from_y = y1 + (y2 - y1) * 3 // 4
+            swipe_to_y = y1 + (y2 - y1) // 4
+
+            for _ in range(MAX_SCROLLS_PER_CONTAINER):
+                self.device.swipe(cx, swipe_from_y, cx, swipe_to_y)
+                time.sleep(self.config.settle_delay)
+
+                new_clickable = self.device.get_clickable_elements()
+                new_keys = {(e.bounds, e.label) for e in new_clickable}
+                newly_found = new_keys - known_keys
+
+                if not newly_found:
+                    break  # No new elements revealed — stop scrolling
+
+                print(f"  [scroll] Found {len(newly_found)} new elements")
+                for e in new_clickable:
+                    if (e.bounds, e.label) not in known_keys:
+                        all_elements.append(e)
+                        known_keys.add((e.bounds, e.label))
+
+        return all_elements
 
     def _is_outside_target_app(self) -> bool:
         """Check if the foreground activity belongs to a different app."""
@@ -249,6 +375,11 @@ class Crawler:
             for e in clickable
         ]
 
+        # Only pass focus_screen to the analyzer during the navigation phase
+        active_focus = (
+            self.config.focus_screen if not self.state.focus_reached else None
+        )
+
         print(f"  [NEW] Analyzing screen ({len(self.state.screens) + 1})...")
         analysis = self.analyzer.analyze_screen(
             screenshot,
@@ -256,7 +387,17 @@ class Crawler:
             visited_screens=self._visited_screen_names(),
             current_path=self.state.current_path,
             avoid_flows=self.config.avoid_flows or None,
+            focus_screen=active_focus,
         )
+
+        # Check if this screen matches the focus target
+        if (
+            self.config.focus_screen
+            and not self.state.focus_reached
+            and analysis.matches_focus_target
+        ):
+            self.state.focus_reached = True
+            print(f"  [focus] Reached target screen: {analysis.screen_name}")
 
         self._record_screen(screenshot, screen_id, analysis)
         print(f"         → {analysis.screen_name}: {analysis.description[:80]}")
@@ -303,12 +444,22 @@ class Crawler:
         Uses heuristic short-circuits first (stuck detection, depth limit),
         then falls back to Claude for intelligent exploration decisions.
         """
-        # If we keep landing on already-seen screens, we're in a loop — back out
-        if consecutive_known > 5:
+        # Safety net: if we keep landing on already-seen screens, back out.
+        # Threshold is 10 (not 5) because per-element tracking below handles
+        # the common case more precisely.
+        if consecutive_known > 10:
             return NavigationAction(action="back", reason="stuck in loop")
         # Don't go deeper than the configured limit — breadth-first is more useful
         if len(self.state.current_path) > self.config.max_depth:
             return NavigationAction(action="back", reason="max depth reached")
+
+        # Check if every clickable element on this screen has already been
+        # tapped. If so, there's nothing new to try — back out immediately
+        # without spending an API call on Claude.
+        tapped = self.state.screen_tapped_elements.get(screen_id, set())
+        clickable_keys = {(e.bounds, e.label) for e in clickable}
+        if clickable_keys and not (clickable_keys - tapped):
+            return NavigationAction(action="back", reason="all elements explored")
 
         try:
             elements_for_ai = [
@@ -316,6 +467,9 @@ class Crawler:
                 for e in clickable
             ]
             recent_actions = self.state.screen_actions.get(screen_id, [])
+            active_focus = (
+                self.config.focus_screen if not self.state.focus_reached else None
+            )
             action = self.analyzer.decide_next_action(
                 screenshot,
                 elements_for_ai,
@@ -323,6 +477,7 @@ class Crawler:
                 recent_actions=recent_actions,
                 target_package=self.config.package,
                 avoid_flows=self.config.avoid_flows or None,
+                focus_screen=active_focus,
             )
             # Record what we did on this screen so Claude won't suggest the
             # same action again on future visits to this screen
@@ -332,6 +487,26 @@ class Crawler:
         except Exception as e:
             logger.error("Navigation decision failed: %s", e)
             return NavigationAction(action="back", reason=f"decision error: {e}")
+
+    def _record_tapped_element(
+        self, screen_id: str, action: NavigationAction, clickable: list,
+    ) -> None:
+        """Record which element was tapped using the closest clickable element's
+        structural identity (bounds + label). This feeds the per-element loop
+        detector in _decide_action().
+        """
+        best = None
+        best_dist = float("inf")
+        for e in clickable:
+            cx, cy = e.center
+            dist = abs(cx - action.x) + abs(cy - action.y)
+            if dist < best_dist:
+                best_dist = dist
+                best = e
+        if best is not None:
+            self.state.screen_tapped_elements.setdefault(screen_id, set()).add(
+                (best.bounds, best.label)
+            )
 
     def _execute_action(self, action: NavigationAction) -> None:
         """Execute a navigation action on the device.

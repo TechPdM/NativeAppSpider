@@ -32,27 +32,27 @@ def test_parse_bounds_empty():
 # --- UIElement ---
 
 def test_ui_element_center():
-    el = UIElement("id", "cls", "text", "desc", (0, 0, 100, 200), True, False, True)
+    el = UIElement("id", "cls", "text", "desc", "", (0, 0, 100, 200), True, False, True)
     assert el.center == (50, 100)
 
 
 def test_ui_element_label_prefers_text():
-    el = UIElement("id", "cls", "Submit", "desc", (0, 0, 0, 0), True, False, True)
+    el = UIElement("id", "cls", "Submit", "desc", "", (0, 0, 0, 0), True, False, True)
     assert el.label == "Submit"
 
 
 def test_ui_element_label_falls_back_to_content_desc():
-    el = UIElement("id", "cls", "", "Search", (0, 0, 0, 0), True, False, True)
+    el = UIElement("id", "cls", "", "Search", "", (0, 0, 0, 0), True, False, True)
     assert el.label == "Search"
 
 
 def test_ui_element_label_falls_back_to_resource_id():
-    el = UIElement("com.app:id/btn", "cls", "", "", (0, 0, 0, 0), True, False, True)
+    el = UIElement("com.app:id/btn", "cls", "", "", "", (0, 0, 0, 0), True, False, True)
     assert el.label == "com.app:id/btn"
 
 
 def test_ui_element_label_falls_back_to_class():
-    el = UIElement("", "android.widget.Button", "", "", (0, 0, 0, 0), True, False, True)
+    el = UIElement("", "android.widget.Button", "", "", "", (0, 0, 0, 0), True, False, True)
     assert el.label == "android.widget.Button"
 
 

@@ -27,6 +27,7 @@ class ScreenAnalysis:
     description: str
     elements: list[dict]  # [{label, type, purpose, bounds}]
     suggested_actions: list[dict]  # [{action, target, reason, coordinates}]
+    matches_focus_target: bool = False
 
 
 @dataclass
@@ -103,6 +104,7 @@ class Analyzer:
         visited_screens: list[str] | None = None,
         current_path: list[str] | None = None,
         avoid_flows: list[str] | None = None,
+        focus_screen: str | None = None,
     ) -> ScreenAnalysis:
         """Analyze a screenshot and return structured screen documentation."""
         # Build context to help Claude make better decisions. Each piece of
@@ -124,8 +126,22 @@ class Analyzer:
                 f"AVOIDED FLOWS: The following flows should be skipped: {', '.join(avoid_flows)}. "
                 f"Note in the description if this screen is part of an avoided flow."
             )
+        if focus_screen:
+            context_parts.append(
+                f"TARGET SCREEN: Navigate toward the '{focus_screen}' screen. "
+                f"Note in the description if this screen is on the path to the target."
+            )
 
         context = "\n\n".join(context_parts)
+
+        # When a focus target is set, ask Claude to judge whether this screen
+        # IS the target — more reliable than fuzzy name matching
+        focus_field = ""
+        if focus_screen:
+            focus_field = (
+                f',\n  "matches_focus_target": true/false '
+                f'// Is this the \'{focus_screen}\' screen itself (not just a screen that mentions it)?'
+            )
 
         response = _call_with_retry(
             self._client,
@@ -154,7 +170,7 @@ class Analyzer:
   ],
   "suggested_actions": [
     {{"action": "tap|swipe_up|swipe_down|type", "target": "element description", "reason": "why explore this", "x": 0, "y": 0}}
-  ]
+  ]{focus_field}
 }}
 
 Focus on interactive elements. For suggested_actions, prioritize elements that likely lead to NEW screens we haven't visited yet. Include x,y coordinates for each action based on where elements appear in the screenshot.
@@ -188,6 +204,7 @@ Return ONLY valid JSON, no markdown fences.""",
             description=data.get("description", "") or "",
             elements=data.get("elements") if isinstance(data.get("elements"), list) else [],
             suggested_actions=data.get("suggested_actions") if isinstance(data.get("suggested_actions"), list) else [],
+            matches_focus_target=bool(data.get("matches_focus_target", False)),
         )
 
     def decide_next_action(
@@ -198,6 +215,7 @@ Return ONLY valid JSON, no markdown fences.""",
         recent_actions: list[str] | None = None,
         target_package: str | None = None,
         avoid_flows: list[str] | None = None,
+        focus_screen: str | None = None,
     ) -> NavigationAction:
         """Decide which action to take next to maximize exploration coverage."""
         context_parts = []
@@ -215,6 +233,12 @@ Return ONLY valid JSON, no markdown fences.""",
             context_parts.append(
                 f"AVOID these flows — do NOT tap elements that lead into: {', '.join(avoid_flows)}. "
                 f"If the current screen is part of an avoided flow, use \"back\" immediately."
+            )
+        if focus_screen:
+            context_parts.append(
+                f"TARGET SCREEN: Your primary goal is to reach the '{focus_screen}' screen. "
+                f"Choose the action most likely to navigate toward it. "
+                f"Dismiss dialogs, skip onboarding, and take the shortest path."
             )
         extra_context = "\n\n".join(context_parts)
 

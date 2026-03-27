@@ -25,6 +25,7 @@ class UIElement:
     class_name: str
     text: str
     content_desc: str
+    package: str
     bounds: tuple[int, int, int, int]  # x1, y1, x2, y2
     clickable: bool
     scrollable: bool
@@ -288,6 +289,7 @@ class Device:
                 class_name=node.get("class", ""),
                 text=node.get("text", ""),
                 content_desc=node.get("content-desc", ""),
+                package=node.get("package", ""),
                 bounds=_parse_bounds(bounds_str),
                 clickable=node.get("clickable") == "true",
                 scrollable=node.get("scrollable") == "true",

@@ -38,12 +38,17 @@ def _make_screen_image(seed: int) -> Image.Image:
     return Image.fromarray(pixels)
 
 
-def _make_element(label: str, bounds: tuple[int, int, int, int] = (0, 0, 200, 80)) -> UIElement:
+def _make_element(
+    label: str,
+    bounds: tuple[int, int, int, int] = (0, 0, 200, 80),
+    package: str = "com.test.app",
+) -> UIElement:
     return UIElement(
         resource_id=f"com.test.app:id/{label.lower().replace(' ', '_')}",
         class_name="android.widget.Button",
         text=label,
         content_desc="",
+        package=package,
         bounds=bounds,
         clickable=True,
         scrollable=False,
@@ -609,21 +614,25 @@ class TestScreenActionHistory:
     def test_action_history_accumulates(self, tmp_path):
         img = _make_screen_image(seed=90)
 
-        # Same screen every step — the crawler stays on it
+        # Same screen every step — multiple buttons so the per-element
+        # detector doesn't force back before actions accumulate
+        btn_a = _make_element("Btn A", bounds=(0, 0, 200, 80))
+        btn_b = _make_element("Btn B", bounds=(0, 100, 200, 180))
+        btn_c = _make_element("Btn C", bounds=(0, 200, 200, 280))
         device_steps = [
-            DeviceStep(screenshot=img, clickable=[_make_element("Btn")]),
+            DeviceStep(screenshot=img, clickable=[btn_a, btn_b, btn_c]),
         ]
         analyzer_steps = [
             AnalyzerStep(
                 analysis=ScreenAnalysis("Home", "Home screen", [], []),
-                action=NavigationAction(action="tap", x=100, y=40, reason="try button"),
+                action=NavigationAction(action="tap", x=100, y=40, reason="try A"),
             ),
         ]
 
         device = ReplayDevice(device_steps)
         analyzer = ReplayAnalyzer(
             analyzer_steps,
-            fallback_action=NavigationAction(action="tap", x=200, y=80, reason="try another"),
+            fallback_action=NavigationAction(action="tap", x=100, y=140, reason="try B"),
         )
         crawler = _make_crawler(tmp_path, device, analyzer, max_actions=4)
 
@@ -695,3 +704,563 @@ class TestReportGeneration:
 
         # Report should show transition count
         assert "Transitions" in html
+
+
+# ---------------------------------------------------------------------------
+# Scenario: Per-element loop detection
+# ---------------------------------------------------------------------------
+
+class TestPreciseLoopDetection:
+    """Verify that the crawler forces 'back' when all clickable elements
+    on a screen have been tapped, without waiting for the consecutive_known
+    safety net or consulting Claude.
+    """
+
+    def test_forces_back_when_all_elements_tried(self, tmp_path):
+        """Two elements on a screen — after both are tapped, the crawler
+        should back out immediately on the next visit.
+        """
+        img = _make_screen_image(seed=110)
+
+        btn_a = _make_element("Button A", bounds=(0, 0, 200, 80))
+        btn_b = _make_element("Button B", bounds=(0, 100, 200, 180))
+
+        # Same screen every step, with both buttons visible
+        device_steps = [
+            DeviceStep(screenshot=img, clickable=[btn_a, btn_b]),
+        ]
+
+        # Analyzer returns taps on each button in order
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Home", "Home screen", [], []),
+                # Tap center of Button A (100, 40)
+                action=NavigationAction(action="tap", x=100, y=40, reason="try A"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(
+            analyzer_steps,
+            # Fallback taps center of Button B (100, 140)
+            fallback_action=NavigationAction(action="tap", x=100, y=140, reason="try B"),
+        )
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=5)
+
+        state = crawler.crawl()
+
+        # After tapping both buttons, the third visit should force back
+        # with "all elements explored" reason
+        assert "back" in device.actions_performed
+
+        # The screen should have both elements recorded as tapped
+        screen_id = list(state.screens.keys())[0]
+        tapped = state.screen_tapped_elements.get(screen_id, set())
+        assert len(tapped) == 2
+
+    def test_does_not_force_back_with_untried_elements(self, tmp_path):
+        """Three elements on screen, only one tapped so far — should NOT
+        force back, should consult Claude.
+        """
+        img = _make_screen_image(seed=111)
+
+        btn_a = _make_element("Button A", bounds=(0, 0, 200, 80))
+        btn_b = _make_element("Button B", bounds=(0, 100, 200, 180))
+        btn_c = _make_element("Button C", bounds=(0, 200, 200, 280))
+
+        device_steps = [
+            DeviceStep(screenshot=img, clickable=[btn_a, btn_b, btn_c]),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Home", "Home screen", [], []),
+                action=NavigationAction(action="tap", x=100, y=40, reason="try A"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(
+            analyzer_steps,
+            # Fallback also taps A — but since B and C are untried, Claude
+            # should still be consulted (not forced back)
+            fallback_action=NavigationAction(action="tap", x=100, y=40, reason="try A again"),
+        )
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=3)
+
+        state = crawler.crawl()
+
+        # Should NOT have any "back" actions — only taps, because untried
+        # elements exist
+        non_launch = [a for a in device.actions_performed if not a.startswith("launch:")]
+        assert all(a.startswith("tap:") for a in non_launch)
+
+    def test_safety_net_still_works(self, tmp_path):
+        """Even if per-element tracking doesn't trigger (e.g. empty clickable
+        list on revisits), the consecutive_known > 10 safety net should
+        eventually force back.
+        """
+        img = _make_screen_image(seed=112)
+
+        # Screen with no clickable elements — per-element check has nothing
+        # to compare, so the safety net (consecutive_known) must handle it
+        device_steps = [
+            DeviceStep(screenshot=img, clickable=[]),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Empty", "No buttons", [], []),
+                action=NavigationAction(action="tap", x=100, y=40, reason="blind tap"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(
+            analyzer_steps,
+            fallback_action=NavigationAction(action="tap", x=100, y=40, reason="keep trying"),
+        )
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=15)
+
+        state = crawler.crawl()
+
+        # The safety net should have triggered "back" at some point
+        assert "back" in device.actions_performed
+
+
+# ---------------------------------------------------------------------------
+# Scenario: System dialog detection and auto-dismissal
+# ---------------------------------------------------------------------------
+
+def _make_system_element(
+    label: str,
+    package: str = "com.android.permissioncontroller",
+    clickable: bool = True,
+    bounds: tuple[int, int, int, int] = (200, 800, 880, 900),
+) -> UIElement:
+    """Create a UIElement that looks like part of a system dialog."""
+    return UIElement(
+        resource_id=f"{package}:id/{label.lower().replace(' ', '_')}",
+        class_name="android.widget.Button",
+        text=label,
+        content_desc="",
+        package=package,
+        bounds=bounds,
+        clickable=clickable,
+        scrollable=False,
+        enabled=True,
+    )
+
+
+class TestSystemDialogDismissal:
+    """Verify that system dialog overlays (permissions, ANR, etc.) are
+    detected and auto-dismissed without being recorded as app screens.
+    """
+
+    def test_permission_dialog_auto_dismissed(self, tmp_path):
+        """A permission dialog with an 'Allow' button should be tapped
+        and the dialog should NOT be recorded as a screen.
+        """
+        img_dialog = _make_screen_image(seed=120)
+        img_home = _make_screen_image(seed=121)
+
+        allow_btn = _make_system_element("Allow", bounds=(500, 800, 800, 900))
+
+        device_steps = [
+            # Step 0: Permission dialog is showing
+            DeviceStep(
+                screenshot=img_dialog,
+                clickable=[],
+                ui_hierarchy=[
+                    _make_system_element("Deny", bounds=(200, 800, 500, 900)),
+                    allow_btn,
+                ],
+            ),
+            # Step 1: After dismissing, the real home screen appears
+            DeviceStep(
+                screenshot=img_home,
+                clickable=[_make_element("Settings")],
+            ),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Home", "Home screen", [], []),
+                action=NavigationAction(action="back", reason="done"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(analyzer_steps)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=3)
+
+        state = crawler.crawl()
+
+        # The dialog should NOT have been recorded as a screen
+        assert len(state.screens) == 1
+        assert list(state.screens.values())[0].screen_name == "Home"
+
+        # A dismiss button should have been tapped (either "Deny" or "Allow")
+        tap_actions = [a for a in device.actions_performed if a.startswith("tap:")]
+        assert len(tap_actions) >= 1
+
+    def test_dialog_dismissed_via_back(self, tmp_path):
+        """A system dialog with no recognizable dismiss button should be
+        dismissed by pressing back.
+        """
+        img_dialog = _make_screen_image(seed=130)
+        img_home = _make_screen_image(seed=131)
+
+        # Dialog with only a non-standard label
+        weird_btn = _make_system_element("Some random text", package="android")
+
+        device_steps = [
+            DeviceStep(
+                screenshot=img_dialog,
+                clickable=[],
+                ui_hierarchy=[weird_btn],
+            ),
+            DeviceStep(
+                screenshot=img_home,
+                clickable=[_make_element("Menu")],
+            ),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Home", "Home screen", [], []),
+                action=NavigationAction(action="back", reason="done"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(analyzer_steps)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=3)
+
+        state = crawler.crawl()
+
+        # Dialog should not be a screen
+        assert len(state.screens) == 1
+
+        # Back should have been pressed to dismiss
+        # (first "back" is the dialog dismiss, second might be from navigation)
+        assert "back" in device.actions_performed
+
+    def test_normal_screen_not_treated_as_dialog(self, tmp_path):
+        """An app screen with package='com.test.app' should be processed
+        normally, not treated as a system dialog.
+        """
+        img = _make_screen_image(seed=140)
+
+        app_btn = _make_element("Settings")
+
+        device_steps = [
+            DeviceStep(
+                screenshot=img,
+                clickable=[app_btn],
+                # Full hierarchy also has package="com.test.app" — not a system dialog
+                ui_hierarchy=[app_btn],
+            ),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Home", "Home screen", [], []),
+                action=NavigationAction(action="back", reason="done"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(analyzer_steps)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=2)
+
+        state = crawler.crawl()
+
+        # Should be recorded as a normal screen
+        assert len(state.screens) == 1
+        assert list(state.screens.values())[0].screen_name == "Home"
+
+
+# ---------------------------------------------------------------------------
+# Scenario: Scrollable container element discovery
+# ---------------------------------------------------------------------------
+
+def _make_scrollable_container(bounds: tuple[int, int, int, int] = (0, 96, 1080, 1920)) -> UIElement:
+    """Create a scrollable container element."""
+    return UIElement(
+        resource_id="com.test.app:id/scroll_view",
+        class_name="android.widget.ScrollView",
+        text="",
+        content_desc="",
+        package="com.test.app",
+        bounds=bounds,
+        clickable=False,
+        scrollable=True,
+        enabled=True,
+    )
+
+
+class TestScrollableContainerDiscovery:
+    """Verify that the crawler scrolls through scrollable containers
+    to discover off-screen elements on new screens.
+    """
+
+    def test_scroll_reveals_new_elements(self, tmp_path):
+        """A scrollable container with off-screen elements — scrolling
+        should reveal them and include them in the screen's element list.
+        """
+        img = _make_screen_image(seed=150)
+
+        btn_a = _make_element("Visible A", bounds=(0, 200, 500, 300))
+        btn_b = _make_element("Visible B", bounds=(0, 400, 500, 500))
+        # These appear after scrolling
+        btn_c = _make_element("Hidden C", bounds=(0, 200, 500, 300))
+        btn_d = _make_element("Hidden D", bounds=(0, 400, 500, 500))
+
+        container = _make_scrollable_container()
+
+        # Step 0: Initial screen with 2 visible buttons + scrollable container
+        # Step 1: After scroll, device returns 2 new buttons
+        # Step 2: After second scroll, no new buttons (same as step 1)
+        device_steps = [
+            DeviceStep(
+                screenshot=img,
+                clickable=[btn_a, btn_b],
+                ui_hierarchy=[container, btn_a, btn_b],
+            ),
+            # After first scroll: new elements appear
+            DeviceStep(
+                screenshot=img,
+                clickable=[btn_c, btn_d],
+                ui_hierarchy=[container, btn_c, btn_d],
+            ),
+            # After second scroll: same elements (no new ones → stop)
+            DeviceStep(
+                screenshot=img,
+                clickable=[btn_c, btn_d],
+                ui_hierarchy=[container, btn_c, btn_d],
+            ),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Long List", "A scrollable list", [], []),
+                action=NavigationAction(action="back", reason="done"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(analyzer_steps)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=3)
+
+        state = crawler.crawl()
+
+        # Should have performed swipe actions within the container
+        swipes = [a for a in device.actions_performed if a.startswith("swipe:")]
+        assert len(swipes) >= 1
+
+        # The swipe should be within the container bounds (x center = 540)
+        assert "540," in swipes[0]
+
+    def test_scroll_stops_when_no_new_elements(self, tmp_path):
+        """If scrolling reveals no new elements, the crawler should stop
+        scrolling after one attempt.
+        """
+        img = _make_screen_image(seed=160)
+
+        btn_a = _make_element("Button", bounds=(0, 200, 500, 300))
+        container = _make_scrollable_container()
+
+        # Same elements before and after scroll
+        device_steps = [
+            DeviceStep(
+                screenshot=img,
+                clickable=[btn_a],
+                ui_hierarchy=[container, btn_a],
+            ),
+            # After scroll: same element, no new ones
+            DeviceStep(
+                screenshot=img,
+                clickable=[btn_a],
+            ),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Short List", "Nothing to scroll", [], []),
+                action=NavigationAction(action="back", reason="done"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(analyzer_steps)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=3)
+
+        state = crawler.crawl()
+
+        # Should have tried exactly 1 scroll, then stopped
+        swipes = [a for a in device.actions_performed if a.startswith("swipe:")]
+        assert len(swipes) == 1
+
+    def test_no_scroll_when_no_scrollable_containers(self, tmp_path):
+        """A screen with no scrollable elements should not trigger any
+        scroll-related swipe actions during element discovery.
+        """
+        img = _make_screen_image(seed=170)
+
+        device_steps = [
+            DeviceStep(
+                screenshot=img,
+                clickable=[_make_element("Button")],
+                # No scrollable elements in hierarchy
+                ui_hierarchy=[_make_element("Button")],
+            ),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Static", "No scrolling", [], []),
+                action=NavigationAction(action="back", reason="done"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(analyzer_steps)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=2)
+
+        state = crawler.crawl()
+
+        # No swipe actions should have occurred during discovery
+        swipes = [a for a in device.actions_performed if a.startswith("swipe:")]
+        assert len(swipes) == 0
+
+
+# ---------------------------------------------------------------------------
+# Scenario: --focus flag navigates to target then explores
+# ---------------------------------------------------------------------------
+
+class TestFocusNavigation:
+    """Verify that --focus biases navigation toward a target screen,
+    then switches to normal exploration once reached.
+    """
+
+    def test_focus_navigates_to_target(self, tmp_path):
+        """Crawl with focus='map'. The crawler passes through Splash and
+        Menu, then reaches Map and marks focus_reached.
+        """
+        img_splash = _make_screen_image(seed=200)
+        img_menu = _make_screen_image(seed=201)
+        img_map = _make_screen_image(seed=202)
+        img_detail = _make_screen_image(seed=203)
+
+        device_steps = [
+            DeviceStep(screenshot=img_splash, clickable=[_make_element("Continue")]),
+            DeviceStep(screenshot=img_menu, clickable=[_make_element("Map"), _make_element("Settings")]),
+            DeviceStep(screenshot=img_map, clickable=[_make_element("Pin A"), _make_element("Filter")]),
+            DeviceStep(screenshot=img_detail, clickable=[]),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Splash", "Welcome splash screen", [], []),
+                action=NavigationAction(action="tap", x=100, y=40, reason="dismiss splash"),
+            ),
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Main Menu", "App main menu", [], []),
+                action=NavigationAction(action="tap", x=100, y=40, reason="go to map"),
+            ),
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Map View", "Interactive map showing locations", [], [],
+                                        matches_focus_target=True),
+                action=NavigationAction(action="tap", x=100, y=40, reason="tap a pin"),
+            ),
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Location Detail", "Details about a location", [], []),
+                action=NavigationAction(action="back", reason="done"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(analyzer_steps)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=5)
+        crawler.config.focus_screen = "map"
+
+        state = crawler.crawl()
+
+        # Focus should have been reached at "Map View"
+        assert state.focus_reached is True
+        # All screens along the way should still be recorded
+        names = {s.screen_name for s in state.screens.values()}
+        assert "Map View" in names
+        assert "Splash" in names
+
+    def test_focus_stops_biasing_after_reached(self, tmp_path):
+        """Once the focus screen is reached, the analyzer should NOT
+        receive focus_screen anymore — normal exploration resumes.
+        """
+        img_a = _make_screen_image(seed=210)
+        img_target = _make_screen_image(seed=211)
+        img_c = _make_screen_image(seed=212)
+
+        device_steps = [
+            DeviceStep(screenshot=img_a, clickable=[_make_element("Go")]),
+            DeviceStep(screenshot=img_target, clickable=[_make_element("Explore")]),
+            DeviceStep(screenshot=img_c, clickable=[]),
+        ]
+
+        received_focus = []
+
+        class SpyAnalyzer:
+            """Tracks what focus_screen values are passed to each call."""
+            def __init__(self):
+                self._step = 0
+
+            def analyze_screen(self, screenshot, **kwargs):
+                received_focus.append(("analyze", kwargs.get("focus_screen")))
+                names = ["Home", "Settings Page", "Sub Settings"]
+                name = names[self._step] if self._step < len(names) else "Extra"
+                # "Settings Page" is the focus target
+                is_target = (name == "Settings Page")
+                return ScreenAnalysis(name, f"Screen {self._step}", [], [],
+                                      matches_focus_target=is_target)
+
+            def decide_next_action(self, screenshot, clickable_elements, visited_screens, **kwargs):
+                received_focus.append(("decide", kwargs.get("focus_screen")))
+                action = NavigationAction(action="tap", x=100, y=40, reason="explore")
+                self._step += 1
+                return action
+
+        device = ReplayDevice(device_steps)
+        crawler = _make_crawler(tmp_path, device, SpyAnalyzer(), max_actions=3)
+        crawler.config.focus_screen = "settings"
+
+        state = crawler.crawl()
+
+        # First screen ("Home") — focus not yet reached, should pass "settings"
+        assert received_focus[0] == ("analyze", "settings")
+        assert received_focus[1] == ("decide", "settings")
+
+        # Second screen ("Settings Page") — focus matched! analyze gets it,
+        # but decide should NOT (focus_reached flipped after analyze)
+        assert received_focus[2] == ("analyze", "settings")
+        assert received_focus[3] == ("decide", None)
+
+        # Third screen — focus already reached, neither gets it
+        assert received_focus[4] == ("analyze", None)
+
+    def test_focus_none_behaves_normally(self, tmp_path):
+        """Without --focus, the crawler explores normally without any
+        focus-related state changes.
+        """
+        img = _make_screen_image(seed=220)
+
+        device_steps = [
+            DeviceStep(screenshot=img, clickable=[_make_element("Btn")]),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Home", "Home screen", [], []),
+                action=NavigationAction(action="back", reason="done"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(analyzer_steps)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=2)
+        # No focus_screen set (default None)
+
+        state = crawler.crawl()
+
+        assert state.focus_reached is False
+        assert len(state.screens) == 1

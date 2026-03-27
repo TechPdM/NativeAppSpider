@@ -22,11 +22,13 @@
 
 - **No crawl resume** — each run starts from scratch. Can't continue from a previous crawl's state.
 - **Fixed delay only** — no smart wait for network content. Slow APIs may not load in time (mitigated by `--delay` flag).
-- **No scroll discovery** — only captures what's visible in the viewport. Content below the fold is missed.
+- **~~No scroll discovery~~** — resolved: scrollable containers are now detected and scrolled to reveal off-screen elements.
 - **GPS on headless emulator** — `geo fix` doesn't work with apps using Fused Location Provider (Google Play Services). Location works via IP geolocation or AVD config but isn't reliably controllable.
 - **Auth-gated screens** — screens behind login can't be explored without credentials. The `--avoid` flag helps skip auth flows but doesn't solve accessing authenticated content.
 - **System intents** — camera, file picker, and other system activities launched by the app can trigger relaunch loops (mitigated by max relaunch limit, but the crawler loses its place).
 - **Dynamic content** — screens with changing content (timers, animations, live data) can cause hash instability, leading to duplicate screen entries or missed revisit detection.
+- **Map view hash instability** — map screens render differently on each visit (pan/zoom shifts, marker loading), so the perceptual hash sees each render as a new screen. Needs a map-aware dedup strategy or activity-based screen identity for map views.
+- **Overzealous scroll discovery on maps** — scrollable discovery finds hundreds of map marker elements per scroll, wasting time on non-navigational content. Should filter by element type or skip scroll discovery on map/canvas views.
 
 ---
 
@@ -99,11 +101,15 @@ Test the full crawl pipeline end-to-end without a real device or API key. Record
 - [ ] Capture fixture data from real crawls (screenshots, UI dumps, API responses) for higher-fidelity replay tests
 
 **Edge cases:**
-- [ ] Handle system dialogs (permission prompts, "app not responding", keyboard)
-- [ ] Handle orientation changes mid-crawl
-- [ ] Detect and scroll through scrollable containers for off-screen elements
-- [ ] Improve loop detection — track per-element tap history, not just screen revisit count
+- [x] Handle system dialogs (permission prompts, "app not responding", keyboard) — auto-detects system dialog packages in UI hierarchy and taps dismiss buttons or presses back
+- [ ] Handle orientation changes mid-crawl (postponed)
+- [x] Detect and scroll through scrollable containers for off-screen elements — scrolls within container bounds, stops when no new elements appear, max 5 scrolls per container
+- [x] Improve loop detection — tracks tapped elements per screen by (bounds, label); forces back when all elements explored; raised safety net threshold from 5→10
 - [ ] Add crawl resume/continuation — `--continue-from <crawl-dir>` flag to reload state graph and screen hashes from a previous run, skip known screens, and continue exploring unvisited areas. Also enables resuming after crash.
+
+**`--focus` flag:**
+- [x] Navigate to a named screen first, then explore from there — two-phase crawl with fuzzy screen name matching
+- Current limitation: detection uses `focus_screen.lower() in screen_name.lower()`, which depends on Claude including the focus keyword in the screen name. This can fail if Claude names the screen differently (e.g. `--focus map` won't match "Charging Station Locator" or "Main Dashboard"). Improvement: add a `matches_focus_target: bool` field to the `analyze_screen` JSON response so Claude makes a semantic judgment about whether the screen matches the focus target, rather than relying on substring matching of the name it chose.
 
 **Smart content wait:**
 - [ ] After each action, compare consecutive screenshots — keep waiting until the screen stabilises (hash stops changing). Handles network-dependent screens that take variable time to load. Falls back to max wait timeout.
