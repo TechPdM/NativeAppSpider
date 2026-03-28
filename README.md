@@ -91,37 +91,37 @@ adb shell ping google.com  # Should resolve and get responses (verifies DNS)
 nativeappspider crawl com.example.app
 
 # Limit scope
-nativeappspider crawl com.example.app --max-screens 20 --max-actions 50
+--max-screens 20 --max-actions 50
 
 # Target a specific device
-nativeappspider crawl com.example.app --serial emulator-5554
+--serial emulator-5554
 
 # Fresh start (clears app data so it launches from the initial screen)
-nativeappspider crawl com.example.app --fresh
+--fresh
 
 # Skip specific flows (e.g. avoid registration/login during exploration)
-nativeappspider crawl com.example.app --avoid registration --avoid login --avoid "sign up"
+--avoid registration --avoid login --avoid "sign up"
 
 # Auto-dismiss dialogs (consent banners, cookie popups, onboarding overlays)
-nativeappspider crawl com.example.app --dismiss consent --dismiss cookie --dismiss onboarding
+--dismiss consent --dismiss cookie --dismiss onboarding
 
 # Navigate to a specific screen first, then explore from there
-nativeappspider crawl com.example.app --focus map
+--focus map
 
 # Combine focus, avoid, and dismiss for targeted crawling
-nativeappspider crawl com.example.app --focus settings --avoid login --dismiss consent
+--focus settings --avoid login --dismiss consent
 
 # Use a YAML config file instead of CLI flags
 nativeappspider crawl --config examples/zapmap.yaml
 
 # Use a cheaper model for navigation decisions to reduce costs
-nativeappspider crawl com.example.app --decision-model claude-haiku-4-5
+--decision-model claude-haiku-4-5
 
 # Use a specific model for both analysis and decisions
-nativeappspider crawl com.example.app --model claude-haiku-4-5
+--model claude-haiku-4-5
 
 # Resume a previous crawl with a higher budget
-nativeappspider crawl --continue output/com.example.app_20240101_120000/ --max-screens 30
+--continue output/com.example.app_20240101_120000/ --max-screens 30
 
 # Verbose logging
 nativeappspider -v crawl com.example.app
