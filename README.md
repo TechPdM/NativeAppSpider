@@ -25,6 +25,7 @@ nativeappspider report output/com.example.app_20240101_120000/
 - Python 3.12+
 - Android emulator or device connected via ADB
 - `ANTHROPIC_API_KEY` environment variable set
+- Default model: `claude-sonnet-4-6` (configurable via `--model`, `--analysis-model`, `--decision-model`)
 
 ## Android Setup
 
