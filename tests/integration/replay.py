@@ -7,11 +7,14 @@ Each call pops the next response from a list, simulating a scripted crawl.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from PIL import Image
 
 from nativeappspider.analyzer import NavigationAction, ScreenAnalysis
+from nativeappspider.crawler import CrawlConfig
 from nativeappspider.device import UIElement
 
 
@@ -100,6 +103,9 @@ class ReplayDevice:
         self.actions_performed.append(f"type:{text}")
         self._step_index += 1
 
+    def force_stop(self, package: str) -> None:
+        self.actions_performed.append(f"force_stop:{package}")
+
     def clear_app_data(self, package: str) -> None:
         self.actions_performed.append(f"clear:{package}")
 
@@ -155,3 +161,82 @@ class ReplayAnalyzer:
             self._step_index += 1
             return action
         return self._fallback_action
+
+
+def load_fixture(fixture_dir: Path) -> tuple[ReplayDevice, ReplayAnalyzer, CrawlConfig]:
+    """Load a fixture directory and return replay mocks and config.
+
+    Reads scenario.json and its screenshots to construct a ReplayDevice
+    and ReplayAnalyzer that replay the recorded crawl sequence.
+    """
+    scenario = json.loads((fixture_dir / "scenario.json").read_text())
+
+    device_steps: list[DeviceStep] = []
+    analyzer_steps: list[AnalyzerStep] = []
+
+    for step in scenario["steps"]:
+        # Load screenshot
+        ss_path = fixture_dir / step["screenshot_path"]
+        screenshot = Image.open(ss_path)
+
+        # Reconstruct UIElements
+        clickable = [
+            UIElement(
+                resource_id=e.get("resource_id", ""),
+                class_name=e.get("class_name", ""),
+                text=e.get("text", ""),
+                content_desc=e.get("content_desc", ""),
+                package=e.get("package", ""),
+                bounds=tuple(e.get("bounds", [0, 0, 0, 0])),
+                clickable=e.get("clickable", True),
+                scrollable=e.get("scrollable", False),
+                enabled=e.get("enabled", True),
+            )
+            for e in step.get("clickable", [])
+        ]
+
+        device_steps.append(DeviceStep(
+            screenshot=screenshot,
+            clickable=clickable,
+            activity=step.get("activity", "com.test.app/.MainActivity"),
+        ))
+
+        # Only build an AnalyzerStep if this was a new screen with analysis
+        if step.get("is_new") and step.get("analysis"):
+            a = step["analysis"]
+            analysis = ScreenAnalysis(
+                screen_name=a["screen_name"],
+                description=a["description"],
+                elements=a.get("elements", []),
+                suggested_actions=a.get("suggested_actions", []),
+                matches_focus_target=a.get("matches_focus_target", False),
+            )
+
+            act = step.get("action", {})
+            action = NavigationAction(
+                action=act.get("action", "back"),
+                x=act.get("x", 0),
+                y=act.get("y", 0),
+                text=act.get("text", ""),
+                reason=act.get("reason", ""),
+            )
+
+            analyzer_steps.append(AnalyzerStep(analysis=analysis, action=action))
+
+    # Build config from recorded settings
+    cfg = scenario.get("config", {})
+    config = CrawlConfig(
+        package=cfg.get("package", "com.test.app"),
+        max_screens=cfg.get("max_screens", 50),
+        max_actions=cfg.get("max_actions", 200),
+        max_depth=cfg.get("max_depth", 10),
+        hash_threshold=cfg.get("hash_threshold", 12),
+        avoid_flows=cfg.get("avoid_flows", []),
+        dismiss_flows=cfg.get("dismiss_flows", []),
+        focus_screen=cfg.get("focus_screen"),
+        scroll_discovery=cfg.get("scroll_discovery", True),
+    )
+
+    device = ReplayDevice(device_steps)
+    analyzer = ReplayAnalyzer(analyzer_steps)
+    return device, analyzer, config

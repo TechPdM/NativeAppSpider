@@ -81,6 +81,7 @@ def main(verbose: bool) -> None:
 @click.option("--focus", default=None, help="Navigate to this screen first, then explore from there")
 @click.option("--scroll-discovery/--no-scroll-discovery", default=True,
               help="Scroll containers to find off-screen elements")
+@click.option("--record", is_flag=True, help="Record crawl steps for replay test fixtures")
 @click.pass_context
 def crawl(
     ctx: click.Context,
@@ -98,6 +99,7 @@ def crawl(
     dismiss: tuple[str, ...],
     focus: str | None,
     scroll_discovery: bool,
+    record: bool,
 ) -> None:
     """Crawl an app's UI and document all screens and flows.
 
@@ -193,7 +195,7 @@ def crawl(
     )
 
     try:
-        crawler = Crawler(config, device, model=model)
+        crawler = Crawler(config, device, model=model, record=record)
         click.echo(f"Starting crawl of {package}...")
         state = crawler.crawl()
     except ADBError as e:

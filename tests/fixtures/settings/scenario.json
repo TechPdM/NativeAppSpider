@@ -1,0 +1,1009 @@
+{
+  "config": {
+    "package": "com.android.settings",
+    "max_screens": 5,
+    "max_actions": 15,
+    "max_depth": 10,
+    "hash_threshold": 12,
+    "avoid_flows": [],
+    "dismiss_flows": [],
+    "focus_screen": null,
+    "scroll_discovery": false
+  },
+  "steps": [
+    {
+      "iteration": 1,
+      "screenshot_path": "screenshots/000.png",
+      "activity": "com.android.settings/.Settings",
+      "is_new": true,
+      "screen_id": "0ff9fffffffffffffffffffff81ff00ff00ff81fffffffffffffffffffffffff",
+      "clickable": [
+        {
+          "resource_id": "com.android.settings:id/account_avatar",
+          "class_name": "android.widget.ImageView",
+          "text": "",
+          "content_desc": "Profile picture, double tap to open Google Account",
+          "package": "com.android.settings",
+          "bounds": [
+            891,
+            210,
+            1017,
+            336
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "com.android.settings:id/search_action_bar",
+          "class_name": "android.view.ViewGroup",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            42,
+            526,
+            1038,
+            663
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            705,
+            1080,
+            936
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            936,
+            1080,
+            1167
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1167,
+            1080,
+            1398
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1398,
+            1080,
+            1629
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1629,
+            1080,
+            1860
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1860,
+            1080,
+            1920
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        }
+      ],
+      "analysis": {
+        "screen_name": "Settings Splash Screen",
+        "description": "This is the loading/splash screen for the Android Settings app. It displays the Settings gear icon while the app initializes. The actual settings menu items are loading in the background as indicated by the UI hierarchy elements.",
+        "elements": [
+          {
+            "label": "Google Account Profile Picture",
+            "type": "button",
+            "purpose": "Opens Google Account management screen when double tapped"
+          },
+          {
+            "label": "Search Settings",
+            "type": "input",
+            "purpose": "Search bar to quickly find specific settings options"
+          },
+          {
+            "label": "Settings Menu Item 1",
+            "type": "menu",
+            "purpose": "First settings category item (likely Network/WiFi)"
+          },
+          {
+            "label": "Settings Menu Item 2",
+            "type": "menu",
+            "purpose": "Second settings category item"
+          },
+          {
+            "label": "Settings Menu Item 3",
+            "type": "menu",
+            "purpose": "Third settings category item"
+          },
+          {
+            "label": "Settings Menu Item 4",
+            "type": "menu",
+            "purpose": "Fourth settings category item"
+          },
+          {
+            "label": "Settings Menu Item 5",
+            "type": "menu",
+            "purpose": "Fifth settings category item"
+          }
+        ],
+        "suggested_actions": [
+          {
+            "action": "tap",
+            "target": "Search Settings bar",
+            "reason": "Search functionality can lead to many different settings screens",
+            "x": 540,
+            "y": 594
+          },
+          {
+            "action": "tap",
+            "target": "Google Account Profile Picture",
+            "reason": "Opens Google Account management which is a distinct new screen",
+            "x": 954,
+            "y": 273
+          },
+          {
+            "action": "tap",
+            "target": "First Settings Menu Item",
+            "reason": "Navigate into first settings category to explore new screens",
+            "x": 540,
+            "y": 820
+          },
+          {
+            "action": "swipe_up",
+            "target": "Settings list",
+            "reason": "Reveal more settings categories not currently visible",
+            "x": 540,
+            "y": 900
+          }
+        ],
+        "matches_focus_target": false
+      },
+      "action": {
+        "action": "tap",
+        "x": 540,
+        "y": 820,
+        "text": "",
+        "reason": "Tapping the first LinearLayout item to explore an unvisited settings screen"
+      }
+    },
+    {
+      "iteration": 2,
+      "screenshot_path": "screenshots/001.png",
+      "activity": "com.android.settings/.SubSettings",
+      "is_new": true,
+      "screen_id": "0ff9bfffffff8007a3ffa3fefdfea7fefffea0f8a038803ea1fea1fea7feeffe",
+      "clickable": [
+        {
+          "resource_id": "",
+          "class_name": "android.widget.ImageButton",
+          "text": "",
+          "content_desc": "Navigate up",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            63,
+            147,
+            210
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            533,
+            1080,
+            739
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            739,
+            1080,
+            945
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            945,
+            1080,
+            1151
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1151,
+            1080,
+            1306
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1306,
+            1080,
+            1512
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1512,
+            1080,
+            1718
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1718,
+            1080,
+            1920
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        }
+      ],
+      "analysis": {
+        "screen_name": "Network & Internet Settings",
+        "description": "This screen allows the user to manage all network and internet related settings including WiFi, mobile data, airplane mode, hotspot, data saver, and VPN configurations.",
+        "elements": [
+          {
+            "label": "Navigate up",
+            "type": "button",
+            "purpose": "Go back to the main Settings screen"
+          },
+          {
+            "label": "Internet",
+            "type": "menu",
+            "purpose": "Access WiFi and internet connection settings, currently connected to AndroidWifi"
+          },
+          {
+            "label": "Calls & SMS",
+            "type": "menu",
+            "purpose": "Manage calls and SMS settings, currently showing No SIM"
+          },
+          {
+            "label": "SIMs",
+            "type": "menu",
+            "purpose": "Manage SIM card settings"
+          },
+          {
+            "label": "Airplane mode",
+            "type": "toggle",
+            "purpose": "Enable or disable airplane mode, currently off"
+          },
+          {
+            "label": "Hotspot & tethering",
+            "type": "menu",
+            "purpose": "Configure mobile hotspot and tethering options, currently off"
+          },
+          {
+            "label": "Data Saver",
+            "type": "menu",
+            "purpose": "Configure data saver settings to reduce data usage, currently off"
+          },
+          {
+            "label": "VPN",
+            "type": "menu",
+            "purpose": "Configure VPN connections, currently none configured"
+          }
+        ],
+        "suggested_actions": [
+          {
+            "action": "tap",
+            "target": "Internet - AndroidWifi",
+            "reason": "Leads to WiFi network management screen with detailed connection options",
+            "x": 540,
+            "y": 636
+          },
+          {
+            "action": "tap",
+            "target": "Hotspot & tethering",
+            "reason": "Opens hotspot and tethering configuration screen which is a new unexplored screen",
+            "x": 540,
+            "y": 1030
+          },
+          {
+            "action": "tap",
+            "target": "Data Saver",
+            "reason": "Opens data saver settings screen which is a new unexplored screen",
+            "x": 540,
+            "y": 1186
+          },
+          {
+            "action": "tap",
+            "target": "VPN",
+            "reason": "Opens VPN configuration screen to add and manage VPN connections",
+            "x": 540,
+            "y": 1340
+          },
+          {
+            "action": "tap",
+            "target": "SIMs",
+            "reason": "Opens SIM card management screen for a new unexplored area",
+            "x": 540,
+            "y": 842
+          }
+        ],
+        "matches_focus_target": false
+      },
+      "action": {
+        "action": "tap",
+        "x": 540,
+        "y": 636,
+        "text": "",
+        "reason": "Tapping on the Internet/AndroidWifi option to explore the Internet settings screen, which hasn't been visited yet."
+      }
+    },
+    {
+      "iteration": 3,
+      "screenshot_path": "screenshots/002.png",
+      "activity": "com.android.settings/.SubSettings",
+      "is_new": true,
+      "screen_id": "0ff83fffffff03fffffffffffffffffffc3ffc3ffe7fffffffffffffffffffff",
+      "clickable": [
+        {
+          "resource_id": "",
+          "class_name": "android.widget.ImageButton",
+          "text": "",
+          "content_desc": "Navigate up",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            63,
+            147,
+            210
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.Button",
+          "text": "",
+          "content_desc": "Fix connectivity",
+          "package": "com.android.settings",
+          "bounds": [
+            954,
+            73,
+            1080,
+            199
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            541,
+            1080,
+            747
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "com.android.settings:id/settings_button",
+          "class_name": "android.widget.ImageView",
+          "text": "",
+          "content_desc": "Settings",
+          "package": "com.android.settings",
+          "bounds": [
+            849,
+            541,
+            1038,
+            747
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            747,
+            1080,
+            902
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "AndroidWifi,Connected,Wifi signal full.,Open network",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            902,
+            1080,
+            1108
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1243,
+            1080,
+            1398
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1398,
+            1080,
+            1604
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1604,
+            1080,
+            1810
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1810,
+            1080,
+            1920
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        }
+      ],
+      "analysis": {
+        "screen_name": "Internet Settings Loading Screen",
+        "description": "This screen is part of the Network & Internet settings, specifically the Internet/WiFi section. It is currently loading available network connections and WiFi networks. The user can manage WiFi connections, view connected networks, and fix connectivity issues.",
+        "elements": [
+          {
+            "label": "Navigate up",
+            "type": "button",
+            "purpose": "Go back to the previous screen (Network & Internet Settings)"
+          },
+          {
+            "label": "Fix connectivity",
+            "type": "button",
+            "purpose": "Diagnose and fix internet connectivity issues"
+          },
+          {
+            "label": "Settings gear icon",
+            "type": "button",
+            "purpose": "Open WiFi preferences or advanced WiFi settings"
+          },
+          {
+            "label": "AndroidWifi - Connected network",
+            "type": "menu",
+            "purpose": "View or manage the currently connected WiFi network (AndroidWifi - Open network, full signal)"
+          },
+          {
+            "label": "LinearLayout rows",
+            "type": "menu",
+            "purpose": "Additional WiFi networks or options that are loading"
+          }
+        ],
+        "suggested_actions": [
+          {
+            "action": "tap",
+            "target": "Fix connectivity button",
+            "reason": "Opens a connectivity diagnostic or fix flow which likely leads to a new screen",
+            "x": 1017,
+            "y": 136
+          },
+          {
+            "action": "tap",
+            "target": "Settings gear icon for WiFi preferences",
+            "reason": "Opens advanced WiFi settings, a new screen not yet visited",
+            "x": 943,
+            "y": 644
+          },
+          {
+            "action": "tap",
+            "target": "AndroidWifi connected network row",
+            "reason": "Opens detailed settings for the connected WiFi network, likely a new screen",
+            "x": 540,
+            "y": 1005
+          },
+          {
+            "action": "tap",
+            "target": "LinearLayout row at y=1320",
+            "reason": "May reveal another WiFi network or option leading to a new screen",
+            "x": 540,
+            "y": 1320
+          },
+          {
+            "action": "swipe_up",
+            "target": "Screen content",
+            "reason": "Scroll down to reveal more WiFi networks or options once loading completes",
+            "x": 540,
+            "y": 900
+          }
+        ],
+        "matches_focus_target": false
+      },
+      "action": {
+        "action": "tap",
+        "x": 540,
+        "y": 1005,
+        "text": "",
+        "reason": "Tap on the connected WiFi network (AndroidWifi) to explore its details screen, which should be an unvisited screen"
+      }
+    },
+    {
+      "iteration": 4,
+      "screenshot_path": "screenshots/003.png",
+      "activity": "com.android.settings/.SubSettings",
+      "is_new": true,
+      "screen_id": "0ff8fffcffff001ffe7efe7efc3efe7ecff2fffe20fea3ffa1ffa3ffa3ffe0ff",
+      "clickable": [
+        {
+          "resource_id": "",
+          "class_name": "android.widget.ImageButton",
+          "text": "",
+          "content_desc": "Navigate up",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            63,
+            147,
+            210
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.Button",
+          "text": "",
+          "content_desc": "Modify",
+          "package": "com.android.settings",
+          "bounds": [
+            954,
+            73,
+            1080,
+            199
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "com.android.settings:id/button1",
+          "class_name": "android.widget.Button",
+          "text": "Forget",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            42,
+            933,
+            372,
+            1164
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "com.android.settings:id/button3",
+          "class_name": "android.widget.Button",
+          "text": "Disconnect",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            375,
+            933,
+            705,
+            1164
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "com.android.settings:id/button4",
+          "class_name": "android.widget.Button",
+          "text": "Share",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            708,
+            933,
+            1038,
+            1164
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        },
+        {
+          "resource_id": "",
+          "class_name": "android.widget.LinearLayout",
+          "text": "",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            0,
+            1803,
+            1080,
+            1920
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        }
+      ],
+      "analysis": {
+        "screen_name": "WiFi Network Details",
+        "description": "This screen displays detailed information about the currently connected WiFi network 'AndroidWifi'. The user can view signal strength, frequency, security type, and network usage. They can also forget the network, disconnect from it, or share it via QR code. A modify/edit option is available to change network settings.",
+        "elements": [
+          {
+            "label": "Navigate up",
+            "type": "button",
+            "purpose": "Goes back to the previous screen (Internet Settings)"
+          },
+          {
+            "label": "Modify",
+            "type": "button",
+            "purpose": "Opens a screen to edit/modify the network configuration settings"
+          },
+          {
+            "label": "Forget",
+            "type": "button",
+            "purpose": "Removes the saved network so the device won't auto-connect in the future"
+          },
+          {
+            "label": "Disconnect",
+            "type": "button",
+            "purpose": "Disconnects the device from the current WiFi network without forgetting it"
+          },
+          {
+            "label": "Share",
+            "type": "button",
+            "purpose": "Shares the network credentials via a QR code for other devices to scan and connect"
+          },
+          {
+            "label": "Network usage",
+            "type": "menu",
+            "purpose": "Scrollable section likely showing data usage details for this network"
+          }
+        ],
+        "suggested_actions": [
+          {
+            "action": "tap",
+            "target": "Modify button (pencil icon)",
+            "reason": "Likely opens a new screen to edit network settings such as IP configuration, proxy, or password",
+            "x": 1017,
+            "y": 136
+          },
+          {
+            "action": "tap",
+            "target": "Share button",
+            "reason": "Likely opens a new QR code sharing screen we haven't visited yet",
+            "x": 873,
+            "y": 1048
+          },
+          {
+            "action": "swipe_up",
+            "target": "Screen content",
+            "reason": "Reveals more network details like Network usage, IP address, and other settings below the fold",
+            "x": 540,
+            "y": 1200
+          },
+          {
+            "action": "tap",
+            "target": "Forget button",
+            "reason": "May trigger a confirmation dialog or new state showing network forgotten",
+            "x": 207,
+            "y": 1048
+          }
+        ],
+        "matches_focus_target": false
+      },
+      "action": {
+        "action": "tap",
+        "x": 873,
+        "y": 1048,
+        "text": "",
+        "reason": "Tapping 'Share' to explore an unvisited screen showing QR code or sharing options for the WiFi network"
+      }
+    },
+    {
+      "iteration": 5,
+      "screenshot_path": "screenshots/004.png",
+      "activity": "com.android.settings/.wifi.dpp.WifiDppConfiguratorActivity",
+      "is_new": true,
+      "screen_id": "07f83ffcffff001ffe7ffe7ffc3ffe7fcff3ffff20ffa3ffa1ffa3ff03ffc0ff",
+      "clickable": [
+        {
+          "resource_id": "",
+          "class_name": "android.widget.Button",
+          "text": "Nearby",
+          "content_desc": "",
+          "package": "com.android.settings",
+          "bounds": [
+            423,
+            1461,
+            657,
+            1587
+          ],
+          "clickable": true,
+          "scrollable": false,
+          "enabled": true
+        }
+      ],
+      "analysis": {
+        "screen_name": "WiFi Network Details",
+        "description": "This screen shows detailed information about the currently connected WiFi network 'AndroidWifi'. Users can view network properties like signal strength, frequency, and security type, and perform actions like forgetting the network, disconnecting, or sharing the network credentials via QR code.",
+        "elements": [
+          {
+            "label": "Back arrow",
+            "type": "button",
+            "purpose": "Navigate back to the previous screen (Internet Settings)"
+          },
+          {
+            "label": "Edit (pencil icon)",
+            "type": "button",
+            "purpose": "Edit the network configuration/settings"
+          },
+          {
+            "label": "Forget",
+            "type": "button",
+            "purpose": "Remove/forget this WiFi network so device won't auto-connect"
+          },
+          {
+            "label": "Disconnect",
+            "type": "button",
+            "purpose": "Disconnect from the current WiFi network without forgetting it"
+          },
+          {
+            "label": "Share",
+            "type": "button",
+            "purpose": "Share WiFi credentials via QR code for other devices to connect"
+          },
+          {
+            "label": "Nearby",
+            "type": "button",
+            "purpose": "Navigate to nearby devices or networks section"
+          },
+          {
+            "label": "Signal strength - Excellent",
+            "type": "menu",
+            "purpose": "Displays the current WiFi signal strength"
+          },
+          {
+            "label": "Frequency - 2.4 GHz",
+            "type": "menu",
+            "purpose": "Displays the frequency band of the WiFi network"
+          },
+          {
+            "label": "Security - None",
+            "type": "menu",
+            "purpose": "Displays the security type of the WiFi network"
+          },
+          {
+            "label": "Network usage",
+            "type": "menu",
+            "purpose": "Shows data usage information for this network"
+          }
+        ],
+        "suggested_actions": [
+          {
+            "action": "tap",
+            "target": "Edit pencil icon (top right)",
+            "reason": "Opens an edit/modify network screen not yet visited",
+            "x": 771,
+            "y": 102
+          },
+          {
+            "action": "tap",
+            "target": "Share button",
+            "reason": "Opens a QR code sharing screen that has not been visited yet",
+            "x": 661,
+            "y": 790
+          },
+          {
+            "action": "tap",
+            "target": "Nearby button",
+            "reason": "Navigates to a Nearby devices/networks screen not yet explored",
+            "x": 540,
+            "y": 1524
+          },
+          {
+            "action": "swipe_up",
+            "target": "Screen content",
+            "reason": "Reveals more network details like Network usage that may be interactive",
+            "x": 411,
+            "y": 900
+          },
+          {
+            "action": "tap",
+            "target": "Forget button",
+            "reason": "Triggers a forget network action which may show a confirmation dialog",
+            "x": 157,
+            "y": 790
+          }
+        ],
+        "matches_focus_target": false
+      },
+      "action": {
+        "action": "tap",
+        "x": 540,
+        "y": 1524,
+        "text": "",
+        "reason": "Tapping 'Nearby' button to explore an unvisited screen related to nearby sharing functionality"
+      }
+    }
+  ]
+}

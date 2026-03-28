@@ -15,6 +15,7 @@ from PIL import Image
 from nativeappspider.analyzer import Analyzer, NavigationAction, ScreenAnalysis
 from nativeappspider.device import ADBError, Device
 from nativeappspider.hasher import are_similar, screen_hash
+from nativeappspider.recorder import CrawlRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +68,12 @@ AD_RESOURCE_ID_PATTERNS = (
     "google_ads", "admob",
 )
 
-# Android widget class names that represent text input fields.
-# These are excluded from navigation decisions (the crawler shouldn't
-# tap into form fields) but still documented in screen analysis.
 # How many times a screen can trigger a relaunch before it's marked toxic
 TOXIC_RELAUNCH_THRESHOLD = 2
 
+# Android widget class names that represent text input fields.
+# These are excluded from navigation decisions (the crawler shouldn't
+# tap into form fields) but still documented in screen analysis.
 TEXT_INPUT_CLASSES = frozenset({
     "android.widget.EditText",
     "android.widget.AutoCompleteTextView",
@@ -155,11 +156,13 @@ class CrawlState:
 class Crawler:
     """Orchestrates the app crawling process."""
 
-    def __init__(self, config: CrawlConfig, device: Device | None = None, model: str | None = None):
+    def __init__(self, config: CrawlConfig, device: Device | None = None, model: str | None = None, record: bool = False):
         self.config = config
         self.device = device or Device()
         self.analyzer = Analyzer(model=model) if model else Analyzer()
         self.state = CrawlState()
+        self._record = record
+        self._recorder: CrawlRecorder | None = None
 
     def crawl(self) -> CrawlState:
         """Run the main crawl loop."""
@@ -171,6 +174,21 @@ class Crawler:
         self.state.output_dir = Path(self.config.output_dir) / f"{self.config.package}_{timestamp}"
         self.state.output_dir.mkdir(parents=True, exist_ok=True)
         (self.state.output_dir / "screenshots").mkdir(exist_ok=True)
+
+        # Set up recorder if requested
+        if self._record:
+            config_dict = {
+                "package": self.config.package,
+                "max_screens": self.config.max_screens,
+                "max_actions": self.config.max_actions,
+                "max_depth": self.config.max_depth,
+                "hash_threshold": self.config.hash_threshold,
+                "avoid_flows": self.config.avoid_flows,
+                "dismiss_flows": self.config.dismiss_flows,
+                "focus_screen": self.config.focus_screen,
+                "scroll_discovery": self.config.scroll_discovery,
+            }
+            self._recorder = CrawlRecorder(self.state.output_dir, config_dict)
 
         # Force-stop first to reset the task stack, ensuring we start
         # from the main activity regardless of where the app was left
@@ -231,6 +249,19 @@ class Crawler:
             # Fetch clickable elements once per iteration — reused by both the
             # screen analyzer (to document elements) and the action decider
             clickable = self.device.get_clickable_elements()
+
+            # Start recording this iteration if recorder is active
+            if self._recorder:
+                ss_name = f"screenshots/{screen_id[:16]}.png"
+                self._recorder.begin_step(
+                    iteration=self.state.action_count + 1,
+                    screenshot=screenshot,
+                    screenshot_path=ss_name,
+                    screen_id=screen_id,
+                    is_new=is_new,
+                    activity=self.device.current_activity(),
+                    clickable=clickable,
+                )
 
             if is_new:
                 consecutive_known = 0
@@ -365,6 +396,11 @@ class Crawler:
             self.state.action_count += 1
             print(f"  [{self.state.action_count}] {action.action} → {action.reason}")
 
+            # Finalize recording for this iteration
+            if self._recorder:
+                self._recorder.record_action(action)
+                self._recorder.end_step()
+
             # Record which element was tapped so the per-element loop
             # detector knows this element has been tried on this screen
             if action.action == "tap":
@@ -379,6 +415,9 @@ class Crawler:
 
         # Save crawl results
         self._save_results()
+        if self._recorder:
+            self._recorder.save()
+            print("Recording saved to recording.json")
         print(f"\nCrawl complete: {len(self.state.screens)} screens, "
               f"{self.state.action_count} actions")
         return self.state
@@ -540,32 +579,32 @@ class Crawler:
             return screenshot, existing, False
         return screenshot, current_hash, True
 
+    @staticmethod
+    def _matches_flow_keywords(name: str, description: str, keywords: list[str]) -> bool:
+        """Check if name or description contains any keyword (case-insensitive)."""
+        if not keywords:
+            return False
+        name_lower = name.lower()
+        desc_lower = description.lower()
+        return any(
+            kw.lower() in name_lower or kw.lower() in desc_lower
+            for kw in keywords
+        )
+
     def _is_avoided_screen(self, analysis: ScreenAnalysis) -> bool:
         """Check if a screen matches any of the avoid flows."""
-        if not self.config.avoid_flows:
-            return False
-        name_lower = analysis.screen_name.lower()
-        desc_lower = analysis.description.lower()
-        for flow in self.config.avoid_flows:
-            flow_lower = flow.lower()
-            if flow_lower in name_lower or flow_lower in desc_lower:
-                return True
-        return False
+        return self._matches_flow_keywords(
+            analysis.screen_name, analysis.description, self.config.avoid_flows,
+        )
 
     def _is_dismiss_screen(self, screen_id: str) -> bool:
         """Check if a recorded screen matches any dismiss flow keywords."""
-        if not self.config.dismiss_flows:
-            return False
         node = self.state.screens.get(screen_id)
         if not node:
             return False
-        name_lower = node.screen_name.lower()
-        desc_lower = node.description.lower()
-        for flow in self.config.dismiss_flows:
-            flow_lower = flow.lower()
-            if flow_lower in name_lower or flow_lower in desc_lower:
-                return True
-        return False
+        return self._matches_flow_keywords(
+            node.screen_name, node.description, self.config.dismiss_flows,
+        )
 
     def _auto_dismiss_app_dialog(self, clickable: list) -> bool:
         """Try to dismiss an app-level dialog by tapping a dismiss button.
@@ -635,6 +674,9 @@ class Crawler:
             dismiss_flows=self.config.dismiss_flows or None,
             focus_screen=active_focus,
         )
+
+        if self._recorder:
+            self._recorder.record_analysis(analysis)
 
         # Skip recording screens that match avoided flows
         if self._is_avoided_screen(analysis):

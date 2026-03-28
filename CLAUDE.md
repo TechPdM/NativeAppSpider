@@ -53,3 +53,12 @@ uv run ruff check src/   # Lint
 - Breadth-first exploration with backtracking via back button
 - Claude analyzes each screen to identify tappable elements and suggest which to explore next
 - Cost control: configurable max screens and max depth limits
+- Force-stop before launch ensures clean start from main activity (no stale task stack)
+- Text input fields excluded from navigation — documented but never tapped
+- Toxic screen detection auto-skips screens that repeatedly cause relaunches
+- Name-based dedup treats same-named screens as revisits (prevents form-state variants eating screen budget)
+- Ad regions masked before hashing so rotating ads don't create duplicate screens
+- `--focus` triggers breadth-first: systematically tries untried elements on the focus screen
+- `--dismiss` auto-taps accept/close buttons on matching screens (for dialogs that ignore back button)
+- `--avoid` skips screens matching keywords without recording them
+- YAML config files (`--config`) as alternative to CLI flags

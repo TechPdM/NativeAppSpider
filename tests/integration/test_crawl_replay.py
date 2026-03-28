@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 import numpy as np
 from PIL import Image
 
@@ -19,7 +21,7 @@ from nativeappspider.analyzer import NavigationAction, ScreenAnalysis
 from nativeappspider.crawler import CrawlConfig, Crawler
 from nativeappspider.device import UIElement
 
-from .replay import AnalyzerStep, DeviceStep, ReplayAnalyzer, ReplayDevice
+from .replay import AnalyzerStep, DeviceStep, ReplayAnalyzer, ReplayDevice, load_fixture
 
 
 # ---------------------------------------------------------------------------
@@ -464,11 +466,11 @@ class TestAnalysisFailureFallback:
 # ---------------------------------------------------------------------------
 
 class TestDuplicateScreenNameDedup:
-    """When Claude gives the same name to two different screens, the
-    output should disambiguate them with numeric suffixes.
+    """When Claude gives the same name to two visually different screens,
+    name-based dedup treats the second as a revisit of the first.
     """
 
-    def test_deduplicates_screen_names_in_output(self, tmp_path):
+    def test_deduplicates_same_named_screens(self, tmp_path):
         img_a = _make_screen_image(seed=60)
         img_b = _make_screen_image(seed=61)
 
@@ -491,19 +493,17 @@ class TestDuplicateScreenNameDedup:
 
         device = ReplayDevice(device_steps)
         analyzer = ReplayAnalyzer(analyzer_steps)
-        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=3)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=2)
 
         state = crawler.crawl()
 
-        # After dedup, names should be unique (e.g. "Settings (1)", "Settings (2)")
-        names = [s.screen_name for s in state.screens.values()]
-        assert len(set(names)) == 2  # All names are unique
-        assert all("Settings" in n for n in names)  # Both still contain "Settings"
-
-        # Verify the output JSON also has deduplicated names
-        screens_json = json.loads((state.output_dir / "screens.json").read_text())
-        json_names = [s["screen_name"] for s in screens_json.values()]
-        assert len(set(json_names)) == 2
+        # Name-based dedup merges the second "Settings" into the first,
+        # so only one unique screen is recorded with an incremented visit count
+        settings_screens = [
+            s for s in state.screens.values() if s.screen_name == "Settings"
+        ]
+        assert len(settings_screens) == 1
+        assert settings_screens[0].visit_count >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -790,9 +790,12 @@ class TestPreciseLoopDetection:
         state = crawler.crawl()
 
         # Should NOT have any "back" actions — only taps, because untried
-        # elements exist
-        non_launch = [a for a in device.actions_performed if not a.startswith("launch:")]
-        assert all(a.startswith("tap:") for a in non_launch)
+        # elements exist. Filter out launch/force_stop setup actions.
+        nav_actions = [
+            a for a in device.actions_performed
+            if not a.startswith(("launch:", "force_stop:"))
+        ]
+        assert all(a.startswith("tap:") for a in nav_actions)
 
     def test_safety_net_still_works(self, tmp_path):
         """Even if per-element tracking doesn't trigger (e.g. empty clickable
@@ -1264,3 +1267,80 @@ class TestFocusNavigation:
 
         assert state.focus_reached is False
         assert len(state.screens) == 1
+
+
+# ---------------------------------------------------------------------------
+# Scenario: Replay from real crawl fixture data (Android Settings)
+# ---------------------------------------------------------------------------
+
+SETTINGS_FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "settings"
+
+
+def _make_fixture_crawler(tmp_path: Path, fixture_dir: Path) -> tuple[Crawler, ReplayDevice]:
+    """Build a Crawler from fixture data, bypassing the Analyzer constructor."""
+    device, analyzer, config = load_fixture(fixture_dir)
+    config.output_dir = str(tmp_path)
+    config.settle_delay = 0
+
+    crawler = Crawler.__new__(Crawler)
+    crawler.config = config
+    crawler.device = device
+    crawler.analyzer = analyzer
+    crawler.state = __import__(
+        "nativeappspider.crawler", fromlist=["CrawlState"]
+    ).CrawlState()
+    crawler._record = False
+    crawler._recorder = None
+    return crawler, device
+
+
+class TestSettingsFixture:
+    """Replay a real Android Settings crawl from captured fixture data.
+
+    Uses actual screenshots and analysis results recorded during a live
+    crawl of the built-in Settings app (com.android.settings).
+    """
+
+    @staticmethod
+    def _fixture_exists():
+        return (SETTINGS_FIXTURE_DIR / "scenario.json").exists()
+
+    def test_fixture_crawl_discovers_screens(self, tmp_path):
+        if not self._fixture_exists():
+            pytest.skip("Settings fixture not found")
+
+        crawler, _ = _make_fixture_crawler(tmp_path, SETTINGS_FIXTURE_DIR)
+        state = crawler.crawl()
+
+        assert len(state.screens) >= 3
+
+        assert (state.output_dir / "screens.json").exists()
+        assert (state.output_dir / "transitions.json").exists()
+        assert (state.output_dir / "flow.mmd").exists()
+
+    def test_fixture_crawl_produces_valid_graph(self, tmp_path):
+        if not self._fixture_exists():
+            pytest.skip("Settings fixture not found")
+
+        crawler, _ = _make_fixture_crawler(tmp_path, SETTINGS_FIXTURE_DIR)
+        state = crawler.crawl()
+
+        assert state.graph.number_of_nodes() >= 1
+        for screen in state.screens.values():
+            assert screen.screen_name
+            assert isinstance(screen.screen_name, str)
+
+    def test_fixture_crawl_records_transitions(self, tmp_path):
+        if not self._fixture_exists():
+            pytest.skip("Settings fixture not found")
+
+        crawler, _ = _make_fixture_crawler(tmp_path, SETTINGS_FIXTURE_DIR)
+        state = crawler.crawl()
+
+        # With multiple screens there should be at least one transition
+        transitions = json.loads((state.output_dir / "transitions.json").read_text())
+        assert len(transitions) >= 1
+        # Each transition should have from/to screen names
+        for t in transitions:
+            assert t["from"]
+            assert t["to"]
