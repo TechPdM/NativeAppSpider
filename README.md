@@ -113,6 +113,15 @@ nativeappspider crawl com.example.app --focus settings --avoid login --dismiss c
 # Use a YAML config file instead of CLI flags
 nativeappspider crawl --config examples/zapmap.yaml
 
+# Use a cheaper model for navigation decisions to reduce costs
+nativeappspider crawl com.example.app --decision-model claude-haiku-4-5
+
+# Use a specific model for both analysis and decisions
+nativeappspider crawl com.example.app --model claude-haiku-4-5
+
+# Resume a previous crawl with a higher budget
+nativeappspider crawl --continue output/com.example.app_20240101_120000/ --max-screens 30
+
 # Verbose logging
 nativeappspider -v crawl com.example.app
 
@@ -139,6 +148,8 @@ dismiss:
   - consent
   - privacy
   - cookie
+# Optional: use a cheaper model for navigation decisions
+decision_model: claude-haiku-4-5
 ```
 
 Run with: `nativeappspider crawl --config examples/myapp.yaml`

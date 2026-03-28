@@ -234,11 +234,24 @@ def load_checkpoint(crawl_dir: Path) -> tuple[CrawlState, CrawlConfig]:
 class Crawler:
     """Orchestrates the app crawling process."""
 
-    def __init__(self, config: CrawlConfig, device: Device | None = None, model: str | None = None,
+    def __init__(self, config: CrawlConfig, device: Device | None = None,
+                 model: str | None = None,
+                 analysis_model: str | None = None,
+                 decision_model: str | None = None,
                  record: bool = False, resume_state: CrawlState | None = None):
         self.config = config
         self.device = device or Device()
-        self.analyzer = Analyzer(model=model) if model else Analyzer()
+        if model:
+            self.analyzer = Analyzer(model=model)
+        elif analysis_model or decision_model:
+            kwargs = {}
+            if analysis_model:
+                kwargs["analysis_model"] = analysis_model
+            if decision_model:
+                kwargs["decision_model"] = decision_model
+            self.analyzer = Analyzer(**kwargs)
+        else:
+            self.analyzer = Analyzer()
         self.state = resume_state or CrawlState()
         self._record = record
         self._recorder: CrawlRecorder | None = None

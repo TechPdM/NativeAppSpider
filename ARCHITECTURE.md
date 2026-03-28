@@ -91,7 +91,7 @@ The prompt includes context about already-visited screens so the AI can prioriti
 
 Given the current screenshot, clickable elements, and visited screen names, returns a single `NavigationAction` — the best next step to maximize exploration coverage. Falls back to "back" if the screen appears fully explored.
 
-**Model:** Defaults to `claude-sonnet-4-6` for the balance of vision quality and cost. Each crawl step makes 1-2 API calls (analyze + decide), so a 50-screen crawl is roughly 100 API calls.
+**Model:** Defaults to `claude-sonnet-4-6` for both calls. Analysis and navigation can use different models via `--analysis-model` and `--decision-model` to trade quality for cost. Each crawl step makes 1-2 API calls (analyze + decide), so a 50-screen crawl is roughly 100 API calls.
 
 ### `crawler.py` — Crawl Orchestrator
 
@@ -258,7 +258,27 @@ Each crawl step involves 1-2 Claude API calls with image input. Rough estimates:
 | Medium app (30 screens) | ~80-120 | ~$2-4 |
 | Large app (50 screens, 200 actions) | ~150-250 | ~$5-10 |
 
-Costs scale with the `max_actions` limit more than `max_screens`, since revisited screens still trigger `decide_next_action` calls. Using `claude-sonnet-4-6` (the default) balances vision quality with cost. Switch to `claude-haiku-4-5` for cheaper exploratory runs at some quality tradeoff.
+Costs scale with the `max_actions` limit more than `max_screens`, since revisited screens still trigger `decide_next_action` calls.
+
+### Model Selection
+
+The crawler uses two separate API calls per step, and each can use a different model:
+
+- **Screen analysis** (`analyze_screen`) — documents new screens with names, descriptions, and element inventories. Requires strong vision understanding. Default: `claude-sonnet-4-6`.
+- **Navigation decisions** (`decide_next_action`) — picks which element to tap next. Simpler task, called more frequently. Default: `claude-sonnet-4-6`.
+
+By default both use the same model. To reduce costs, use `--decision-model claude-haiku-4-5` to switch navigation decisions to a cheaper model while keeping analysis on Sonnet. This can cut costs ~30-40% since navigation calls are roughly half of all API calls.
+
+```bash
+# Default: sonnet for both (best quality)
+nativeappspider crawl com.example.app
+
+# Cost-optimised: sonnet for analysis, haiku for decisions
+nativeappspider crawl com.example.app --decision-model claude-haiku-4-5
+
+# Budget: haiku for everything
+nativeappspider crawl com.example.app --model claude-haiku-4-5
+```
 
 ## Testing Architecture
 

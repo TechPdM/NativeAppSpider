@@ -92,10 +92,19 @@ def _call_with_retry(client: anthropic.Anthropic, **kwargs) -> anthropic.types.M
 class Analyzer:
     """Uses Claude to analyze screens and decide navigation."""
 
-    def __init__(self, model: str = "claude-sonnet-4-6"):
+    DEFAULT_MODEL = "claude-sonnet-4-6"
+
+    def __init__(
+        self,
+        model: str | None = None,
+        analysis_model: str | None = None,
+        decision_model: str | None = None,
+    ):
         check_api_key()
         self._client = anthropic.Anthropic()
-        self._model = model
+        base = model or self.DEFAULT_MODEL
+        self._analysis_model = analysis_model or base
+        self._decision_model = decision_model or base
 
     def analyze_screen(
         self,
@@ -151,7 +160,7 @@ class Analyzer:
 
         response = _call_with_retry(
             self._client,
-            model=self._model,
+            model=self._analysis_model,
             max_tokens=2000,
             messages=[{
                 "role": "user",
@@ -257,7 +266,7 @@ Return ONLY valid JSON, no markdown fences.""",
 
         response = _call_with_retry(
             self._client,
-            model=self._model,
+            model=self._decision_model,
             max_tokens=500,
             messages=[{
                 "role": "user",

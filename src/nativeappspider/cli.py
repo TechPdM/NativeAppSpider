@@ -74,7 +74,9 @@ def main(verbose: bool) -> None:
 @click.option("--output", default="output", help="Output directory")
 @click.option("--serial", default=None, help="ADB device serial (optional)")
 @click.option("--delay", default=1.5, type=float, help="Seconds to wait after each action")
-@click.option("--model", default=None, help="Claude model to use (e.g. claude-sonnet-4-5-20241022)")
+@click.option("--model", default=None, help="Claude model for both analysis and decisions (shorthand)")
+@click.option("--analysis-model", default=None, help="Claude model for screen analysis (default: claude-sonnet-4-6)")
+@click.option("--decision-model", default=None, help="Claude model for navigation decisions (default: claude-haiku-4-5)")
 @click.option("--fresh", is_flag=True, help="Clear app data before crawling (starts from initial screen)")
 @click.option("--avoid", multiple=True, help="Flows to avoid, e.g. --avoid registration --avoid login")
 @click.option("--dismiss", multiple=True, help="Screens to dismiss quickly, e.g. --dismiss consent --dismiss privacy")
@@ -96,6 +98,8 @@ def crawl(
     serial: str | None,
     delay: float,
     model: str | None,
+    analysis_model: str | None,
+    decision_model: str | None,
     fresh: bool,
     avoid: tuple[str, ...],
     dismiss: tuple[str, ...],
@@ -150,6 +154,8 @@ def crawl(
             "serial": serial,
             "delay": delay,
             "model": model,
+            "analysis_model": analysis_model,
+            "decision_model": decision_model,
             "fresh": fresh,
             "avoid": avoid,
             "dismiss": dismiss,
@@ -166,6 +172,8 @@ def crawl(
         serial = merged.get("serial")
         delay = merged.get("delay", 1.5)
         model = merged.get("model")
+        analysis_model = merged.get("analysis_model")
+        decision_model = merged.get("decision_model")
         fresh = merged.get("fresh", False)
         focus = merged.get("focus")
         scroll_discovery = merged.get("scroll_discovery", True)
@@ -227,8 +235,10 @@ def crawl(
     )
 
     try:
-        crawler = Crawler(config, device, model=model, record=record,
-                          resume_state=resume_state)
+        crawler = Crawler(config, device, model=model,
+                          analysis_model=analysis_model,
+                          decision_model=decision_model,
+                          record=record, resume_state=resume_state)
         click.echo(f"Starting crawl of {package}...")
         state = crawler.crawl()
     except ADBError as e:
