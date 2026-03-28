@@ -111,9 +111,6 @@ nativeappspider crawl com.example.app
 # Combine focus, avoid, and dismiss for targeted crawling
 --focus settings --avoid login --dismiss consent
 
-# Use a YAML config file instead of CLI flags
-nativeappspider crawl --config examples/zapmap.yaml
-
 # Use a cheaper model for navigation decisions to reduce costs
 --decision-model claude-haiku-4-5
 
@@ -122,6 +119,9 @@ nativeappspider crawl --config examples/zapmap.yaml
 
 # Resume a previous crawl with a higher budget
 --continue output/com.example.app_20240101_120000/ --max-screens 30
+
+# Use a YAML config file instead of CLI flags
+nativeappspider crawl --config examples/zapmap.yaml
 
 # Verbose logging
 nativeappspider -v crawl com.example.app

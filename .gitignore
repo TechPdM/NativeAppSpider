@@ -6,3 +6,4 @@ dist/
 output/
 builds/
 .env
+.DS_Store
