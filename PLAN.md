@@ -98,14 +98,14 @@ Test the full crawl pipeline end-to-end without a real device or API key. Record
 - [x] Build `ReplayDevice` and `ReplayAnalyzer` that replay scripted sequences (`tests/integration/replay.py`)
 - [x] Run `Crawler` against replay mocks — 4 scenarios, 10 tests (`tests/integration/test_crawl_replay.py`): linear 3-screen crawl, single-screen app, app escape + relaunch, revisit counting + bidirectional transitions
 - [x] Refactoring is now safe without a live device (81 total tests, all passing)
-- [ ] Capture fixture data from real crawls (screenshots, UI dumps, API responses) for higher-fidelity replay tests
+- [x] Capture fixture data from real crawls — `--record` flag captures each crawl step to `recording.json`, `extract_fixture.py` converts to compact fixtures, `load_fixture()` replays them. Android Settings fixture checked in (5 steps, 97 KB). 106 total tests.
 
 **Edge cases:**
 - [x] Handle system dialogs (permission prompts, "app not responding", keyboard) — auto-detects system dialog packages in UI hierarchy and taps dismiss buttons or presses back
 - [ ] Handle orientation changes mid-crawl (postponed)
 - [x] Detect and scroll through scrollable containers for off-screen elements — scrolls within container bounds, stops when no new elements appear, max 5 scrolls per container
 - [x] Improve loop detection — tracks tapped elements per screen by (bounds, label); forces back when all elements explored; raised safety net threshold from 5→10
-- [ ] Add crawl resume/continuation — `--continue-from <crawl-dir>` flag to reload state graph and screen hashes from a previous run, skip known screens, and continue exploring unvisited areas. Also enables resuming after crash.
+- [x] Add crawl resume/continuation — `--continue <crawl-dir>` flag reloads state graph, screen hashes, tapped elements, toxic screens, and focus state from `crawl_state.json`. Continues in the same output directory. Budget params (`--max-screens`, `--max-actions`) can be overridden. Checkpoint saved after every iteration for crash resilience (atomic write via tmp+rename). Validated on Android Settings: 3 screens → resume → 8 screens.
 
 **`--focus` flag:**
 - [x] Navigate to a named screen first, then explore from there — two-phase crawl with fuzzy screen name matching
@@ -117,7 +117,7 @@ Test the full crawl pipeline end-to-end without a real device or API key. Record
 **Crawl monitoring:**
 - [ ] Write `progress.json` to output dir after each action (screen count, action count, current screen name) — enables external monitoring
 - [ ] Add `--live` flag for unbuffered console output so progress is visible in real time when running in foreground
-- [ ] Add `--fresh` flag to run `adb shell pm clear <package>` before launch, ensuring app starts from its initial screen
+- [x] Add `--fresh` flag to run `adb shell pm clear <package>` before launch, ensuring app starts from its initial screen
 
 **Code quality (deferred from /simplify review):**
 - [ ] Action type enum — replace raw strings ("tap", "swipe_up", etc.) with a `StrEnum`, currently checked in three places (analyzer, crawler match, tests)
