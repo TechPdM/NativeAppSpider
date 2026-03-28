@@ -21,6 +21,8 @@ from nativeappspider.analyzer import NavigationAction, ScreenAnalysis
 from nativeappspider.crawler import CrawlConfig, Crawler
 from nativeappspider.device import UIElement
 
+from nativeappspider.crawler import load_checkpoint
+
 from .replay import AnalyzerStep, DeviceStep, ReplayAnalyzer, ReplayDevice, load_fixture
 
 
@@ -64,6 +66,7 @@ def _make_crawler(
     analyzer: ReplayAnalyzer,
     max_actions: int = 20,
     max_screens: int = 10,
+    resume_state=None,
 ) -> Crawler:
     """Build a Crawler wired to replay mocks, bypassing the Analyzer constructor."""
     config = CrawlConfig(
@@ -75,7 +78,7 @@ def _make_crawler(
     )
     # Patch Analyzer so the constructor doesn't check for an API key
     with patch("nativeappspider.crawler.Analyzer"):
-        crawler = Crawler(config, device)
+        crawler = Crawler(config, device, resume_state=resume_state)
     # Swap in our replay analyzer
     crawler.analyzer = analyzer
     return crawler
@@ -1344,3 +1347,117 @@ class TestSettingsFixture:
         for t in transitions:
             assert t["from"]
             assert t["to"]
+
+
+# ---------------------------------------------------------------------------
+# Scenario: Crawl resume/continuation
+# ---------------------------------------------------------------------------
+
+class TestCrawlResume:
+    """Test resuming a crawl from a checkpoint.
+
+    First crawl discovers 2 screens then stops (budget hit).
+    Second crawl loads the checkpoint and discovers additional screens.
+    """
+
+    def test_resume_continues_from_checkpoint(self, tmp_path):
+        # --- Phase 1: initial crawl with budget of 2 screens ---
+        img_a = _make_screen_image(seed=200)
+        img_b = _make_screen_image(seed=201)
+        img_c = _make_screen_image(seed=202)
+
+        device_steps_1 = [
+            DeviceStep(screenshot=img_a, clickable=[_make_element("Settings")]),
+            DeviceStep(screenshot=img_b, clickable=[_make_element("WiFi")]),
+        ]
+        analyzer_steps_1 = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Home", "Main screen", [], []),
+                action=NavigationAction(action="tap", x=100, y=40, reason="go to settings"),
+            ),
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Settings", "App settings", [], []),
+                action=NavigationAction(action="tap", x=100, y=40, reason="go to wifi"),
+            ),
+        ]
+
+        device_1 = ReplayDevice(device_steps_1)
+        analyzer_1 = ReplayAnalyzer(analyzer_steps_1)
+        crawler_1 = _make_crawler(tmp_path, device_1, analyzer_1, max_screens=2, max_actions=5)
+        state_1 = crawler_1.crawl()
+
+        assert len(state_1.screens) == 2
+        # Checkpoint should have been saved
+        assert (state_1.output_dir / "crawl_state.json").exists()
+        assert (state_1.output_dir / "screens.json").exists()
+
+        # --- Phase 2: resume from checkpoint with higher budget ---
+        resume_state, resume_config = load_checkpoint(state_1.output_dir)
+
+        assert len(resume_state.screens) == 2
+        assert resume_state.action_count > 0
+
+        device_steps_2 = [
+            # First screenshot after resume — lands on a known screen
+            DeviceStep(screenshot=img_b, clickable=[_make_element("About")]),
+            # Then discovers a new screen
+            DeviceStep(screenshot=img_c, clickable=[]),
+        ]
+        analyzer_steps_2 = [
+            # First step is consumed by decide_next_action on the revisited screen
+            AnalyzerStep(
+                analysis=ScreenAnalysis("_unused", "", [], []),
+                action=NavigationAction(action="tap", x=100, y=40, reason="explore about"),
+            ),
+            # Second step is the actual new screen analysis
+            AnalyzerStep(
+                analysis=ScreenAnalysis("About", "About page", [], []),
+                action=NavigationAction(action="back", reason="done"),
+            ),
+        ]
+
+        device_2 = ReplayDevice(device_steps_2)
+        analyzer_2 = ReplayAnalyzer(analyzer_steps_2)
+        crawler_2 = _make_crawler(
+            tmp_path, device_2, analyzer_2,
+            max_screens=5, max_actions=10,
+            resume_state=resume_state,
+        )
+        # Point output_dir to the same directory
+        crawler_2.state.output_dir = state_1.output_dir
+        state_2 = crawler_2.crawl()
+
+        # Should now have 3 screens (2 original + 1 new)
+        assert len(state_2.screens) == 3
+        names = {s.screen_name for s in state_2.screens.values()}
+        assert "Home" in names
+        assert "Settings" in names
+        assert "About" in names
+
+    def test_checkpoint_preserves_tapped_elements(self, tmp_path):
+        """Verify that screen_tapped_elements survives save/load cycle."""
+        img = _make_screen_image(seed=210)
+        btn = _make_element("Button", bounds=(10, 20, 200, 80))
+
+        device_steps = [
+            DeviceStep(screenshot=img, clickable=[btn]),
+        ]
+        analyzer_steps = [
+            AnalyzerStep(
+                analysis=ScreenAnalysis("Screen", "Test", [], []),
+                action=NavigationAction(action="tap", x=100, y=50, reason="tap"),
+            ),
+        ]
+
+        device = ReplayDevice(device_steps)
+        analyzer = ReplayAnalyzer(analyzer_steps)
+        crawler = _make_crawler(tmp_path, device, analyzer, max_actions=1)
+        state = crawler.crawl()
+
+        assert (state.output_dir / "crawl_state.json").exists()
+
+        # Load checkpoint and verify tapped elements were preserved
+        resume_state, _ = load_checkpoint(state.output_dir)
+        screen_id = list(resume_state.screens.keys())[0]
+        tapped = resume_state.screen_tapped_elements.get(screen_id, set())
+        assert len(tapped) >= 1

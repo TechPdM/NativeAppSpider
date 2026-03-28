@@ -153,14 +153,93 @@ class CrawlState:
         return None
 
 
+def load_checkpoint(crawl_dir: Path) -> tuple[CrawlState, CrawlConfig]:
+    """Load a previous crawl's state and config from disk.
+
+    Reads screens.json, transitions.json, and crawl_state.json to rebuild
+    a CrawlState that can be passed to a Crawler for resumption.
+    """
+    crawl_dir = Path(crawl_dir)
+
+    # Load screens
+    screens_data = json.loads((crawl_dir / "screens.json").read_text())
+    state = CrawlState()
+    state.output_dir = crawl_dir
+
+    name_to_sid: dict[str, str] = {}
+    for sid, sdata in screens_data.items():
+        node = ScreenNode(
+            screen_id=sid,
+            screen_name=sdata["screen_name"],
+            description=sdata["description"],
+            activity=sdata["activity"],
+            elements=sdata["elements"],
+            screenshot_path=sdata["screenshot"],
+            visit_count=sdata.get("visit_count", 1),
+            first_seen=sdata.get("first_seen", ""),
+        )
+        state.screens[sid] = node
+        state.graph.add_node(sid, name=node.screen_name)
+        name_to_sid[node.screen_name] = sid
+
+    # Load transitions and rebuild graph edges
+    transitions = json.loads((crawl_dir / "transitions.json").read_text())
+    for edge in transitions:
+        from_sid = name_to_sid.get(edge["from"])
+        to_sid = name_to_sid.get(edge["to"])
+        if from_sid and to_sid:
+            state.graph.add_edge(
+                from_sid, to_sid,
+                action=edge.get("action", ""),
+                reason=edge.get("reason", ""),
+            )
+
+    # Load runtime state from checkpoint
+    checkpoint_path = crawl_dir / "crawl_state.json"
+    if checkpoint_path.exists():
+        cp = json.loads(checkpoint_path.read_text())
+        state.action_count = cp.get("action_count", 0)
+        state.screen_actions = cp.get("screen_actions", {})
+        state.focus_reached = cp.get("focus_reached", False)
+        state.focus_screen_id = cp.get("focus_screen_id")
+        state.toxic_screen_counts = cp.get("toxic_screen_counts", {})
+
+        # Restore screen_tapped_elements: list of [bounds, label] → set of (tuple, str)
+        for sid, elements in cp.get("screen_tapped_elements", {}).items():
+            state.screen_tapped_elements[sid] = {
+                (tuple(e[0]), e[1]) for e in elements
+            }
+
+        config_data = cp.get("config", {})
+    else:
+        config_data = {}
+
+    config = CrawlConfig(
+        package=config_data.get("package", ""),
+        max_screens=config_data.get("max_screens", 50),
+        max_actions=config_data.get("max_actions", 200),
+        max_depth=config_data.get("max_depth", 10),
+        settle_delay=config_data.get("settle_delay", 1.5),
+        output_dir=str(crawl_dir.parent),
+        hash_threshold=config_data.get("hash_threshold", 12),
+        avoid_flows=config_data.get("avoid_flows", []),
+        dismiss_flows=config_data.get("dismiss_flows", []),
+        focus_screen=config_data.get("focus_screen"),
+        scroll_discovery=config_data.get("scroll_discovery", True),
+    )
+
+    return state, config
+
+
 class Crawler:
     """Orchestrates the app crawling process."""
 
-    def __init__(self, config: CrawlConfig, device: Device | None = None, model: str | None = None, record: bool = False):
+    def __init__(self, config: CrawlConfig, device: Device | None = None, model: str | None = None,
+                 record: bool = False, resume_state: CrawlState | None = None):
         self.config = config
         self.device = device or Device()
         self.analyzer = Analyzer(model=model) if model else Analyzer()
-        self.state = CrawlState()
+        self.state = resume_state or CrawlState()
         self._record = record
         self._recorder: CrawlRecorder | None = None
 
@@ -169,11 +248,18 @@ class Crawler:
         self._screen_w, self._screen_h = self.device.get_screen_size()
         logger.info("Device screen: %dx%d", self._screen_w, self._screen_h)
 
-        # Set up output directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.state.output_dir = Path(self.config.output_dir) / f"{self.config.package}_{timestamp}"
-        self.state.output_dir.mkdir(parents=True, exist_ok=True)
-        (self.state.output_dir / "screenshots").mkdir(exist_ok=True)
+        # Set up output directory — reuse existing dir on resume
+        resuming = bool(self.state.screens)
+        if resuming:
+            # output_dir was already set by load_checkpoint
+            (self.state.output_dir / "screenshots").mkdir(exist_ok=True)
+            print(f"Resuming crawl: {len(self.state.screens)} screens, "
+                  f"{self.state.action_count} actions so far")
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.state.output_dir = Path(self.config.output_dir) / f"{self.config.package}_{timestamp}"
+            self.state.output_dir.mkdir(parents=True, exist_ok=True)
+            (self.state.output_dir / "screenshots").mkdir(exist_ok=True)
 
         # Set up recorder if requested
         if self._record:
@@ -407,6 +493,9 @@ class Crawler:
                 self._record_tapped_element(screen_id, action, clickable)
 
             time.sleep(self.config.settle_delay)
+
+            # Save checkpoint for crash resilience
+            self._save_checkpoint()
 
             # Pressing back pops the navigation stack so our depth tracking
             # stays in sync with the device's actual back stack
@@ -932,4 +1021,41 @@ class Crawler:
 
         (out / "flow.mmd").write_text("\n".join(mermaid) + "\n")
 
+        self._save_checkpoint()
         print(f"Results saved to {out}/")
+
+    def _save_checkpoint(self) -> None:
+        """Save runtime state to crawl_state.json for crash recovery and resume."""
+        # Serialize screen_tapped_elements: set of (tuple, str) → list of [list, str]
+        tapped_serial = {}
+        for sid, elements in self.state.screen_tapped_elements.items():
+            tapped_serial[sid] = [
+                [list(bounds), label] for bounds, label in elements
+            ]
+
+        checkpoint = {
+            "action_count": self.state.action_count,
+            "screen_actions": self.state.screen_actions,
+            "screen_tapped_elements": tapped_serial,
+            "toxic_screen_counts": self.state.toxic_screen_counts,
+            "focus_reached": self.state.focus_reached,
+            "focus_screen_id": self.state.focus_screen_id,
+            "config": {
+                "package": self.config.package,
+                "max_screens": self.config.max_screens,
+                "max_actions": self.config.max_actions,
+                "max_depth": self.config.max_depth,
+                "settle_delay": self.config.settle_delay,
+                "hash_threshold": self.config.hash_threshold,
+                "avoid_flows": self.config.avoid_flows,
+                "dismiss_flows": self.config.dismiss_flows,
+                "focus_screen": self.config.focus_screen,
+                "scroll_discovery": self.config.scroll_discovery,
+            },
+        }
+
+        # Atomic write to avoid corruption on crash
+        out = self.state.output_dir
+        tmp_path = out / "crawl_state.json.tmp"
+        tmp_path.write_text(json.dumps(checkpoint, indent=2))
+        tmp_path.rename(out / "crawl_state.json")

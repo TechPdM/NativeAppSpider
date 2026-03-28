@@ -10,7 +10,7 @@ import click
 import yaml
 
 from nativeappspider.analyzer import check_api_key
-from nativeappspider.crawler import CrawlConfig, Crawler
+from nativeappspider.crawler import CrawlConfig, Crawler, load_checkpoint
 from nativeappspider.device import ADBError, Device
 from nativeappspider.reporter import generate_html_report
 
@@ -82,6 +82,8 @@ def main(verbose: bool) -> None:
 @click.option("--scroll-discovery/--no-scroll-discovery", default=True,
               help="Scroll containers to find off-screen elements")
 @click.option("--record", is_flag=True, help="Record crawl steps for replay test fixtures")
+@click.option("--continue", "continue_from", default=None, type=click.Path(exists=True),
+              help="Resume a previous crawl from its output directory")
 @click.pass_context
 def crawl(
     ctx: click.Context,
@@ -100,14 +102,44 @@ def crawl(
     focus: str | None,
     scroll_discovery: bool,
     record: bool,
+    continue_from: str | None,
 ) -> None:
     """Crawl an app's UI and document all screens and flows.
 
     PACKAGE is the Android package name (e.g. com.example.app).
     Can also be specified in the config file.
     """
-    # Load config file if provided, then merge with CLI args
-    if config_file:
+    # --- Resume mode ---
+    resume_state = None
+    if continue_from:
+        crawl_dir = Path(continue_from)
+        if not (crawl_dir / "screens.json").exists():
+            click.echo(f"Error: {crawl_dir} is not a valid crawl output directory", err=True)
+            sys.exit(1)
+
+        resume_state, saved_config = load_checkpoint(crawl_dir)
+
+        # Use saved config as base, allow CLI overrides for budget params
+        package = package or saved_config.package
+        source = ctx.get_parameter_source
+        if source("max_screens") != click.core.ParameterSource.COMMANDLINE:
+            max_screens = saved_config.max_screens
+        if source("max_actions") != click.core.ParameterSource.COMMANDLINE:
+            max_actions = saved_config.max_actions
+        if source("max_depth") != click.core.ParameterSource.COMMANDLINE:
+            max_depth = saved_config.max_depth
+        delay = saved_config.settle_delay
+        avoid = tuple(saved_config.avoid_flows)
+        dismiss = tuple(saved_config.dismiss_flows)
+        focus = saved_config.focus_screen
+        scroll_discovery = saved_config.scroll_discovery
+        output = str(crawl_dir.parent)
+
+        click.echo(f"Resuming from {crawl_dir} ({len(resume_state.screens)} screens, "
+                    f"{resume_state.action_count} actions)")
+
+    # --- Config file mode ---
+    elif config_file:
         config_data = _load_config_file(config_file)
         cli_params = {
             "package": package,
@@ -167,7 +199,7 @@ def crawl(
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
-    if fresh:
+    if fresh and not continue_from:
         click.echo(f"Clearing app data for {package}...")
         try:
             device.clear_app_data(package)
@@ -195,7 +227,8 @@ def crawl(
     )
 
     try:
-        crawler = Crawler(config, device, model=model, record=record)
+        crawler = Crawler(config, device, model=model, record=record,
+                          resume_state=resume_state)
         click.echo(f"Starting crawl of {package}...")
         state = crawler.crawl()
     except ADBError as e:
