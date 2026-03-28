@@ -260,6 +260,64 @@ Each crawl step involves 1-2 Claude API calls with image input. Rough estimates:
 
 Costs scale with the `max_actions` limit more than `max_screens`, since revisited screens still trigger `decide_next_action` calls. Using `claude-sonnet-4-6` (the default) balances vision quality with cost. Switch to `claude-haiku-4-5` for cheaper exploratory runs at some quality tradeoff.
 
+## Testing Architecture
+
+Three tiers of tests, each with different trade-offs:
+
+### Unit Tests (`tests/unit/`)
+
+Fast, fully mocked, no device or API key needed. Each module has its own test file. Subprocess calls, HTTP requests, and file I/O are all mocked. Run constantly during development (~1s).
+
+### Replay Integration Tests (`tests/integration/`)
+
+Run the real `Crawler` code end-to-end but with scripted device and analyzer responses. Two mock classes in `tests/integration/replay.py` make this possible:
+
+- **`ReplayDevice`** — serves a pre-defined sequence of `DeviceStep`s (screenshot, clickable elements, activity name). Actions (tap, swipe, back) advance to the next step but don't touch a real device.
+- **`ReplayAnalyzer`** — serves a pre-defined sequence of `AnalyzerStep`s (screen analysis, navigation action). No API calls.
+
+Each test scenario defines a list of steps, wires up the mocks, runs `crawler.crawl()`, and asserts on the resulting state graph, output files, and action history. This covers the full pipeline — hashing, graph building, loop detection, backtracking, dedup — without external dependencies.
+
+### Fixture-Based Replay Tests (`tests/fixtures/`)
+
+Replay tests using data captured from real crawls rather than hand-crafted synthetic data. The workflow:
+
+1. **Record** — run a crawl with `--record` to capture each step (screenshot, UI elements, Claude analysis, action chosen) to `recording.json`
+2. **Extract** — run `tests/fixtures/extract_fixture.py` to downscale screenshots and package into a compact fixture directory
+3. **Replay** — `load_fixture()` in `replay.py` reads the fixture and returns `ReplayDevice` + `ReplayAnalyzer` + `CrawlConfig`
+
+Fixtures are checked into the repo. The current fixture uses the Android Settings app (built into every emulator, no commercial data concerns). Screenshots are downscaled to 270x480 to keep the repo small (~97 KB per fixture).
+
+```
+tests/
+├── conftest.py                 # Shared pytest fixtures
+├── fixtures/
+│   ├── extract_fixture.py      # Recording → fixture converter
+│   └── settings/               # Android Settings app fixture
+│       ├── scenario.json       # Steps with elements, analysis, actions
+│       └── screenshots/        # Downscaled PNGs
+├── integration/
+│   ├── replay.py               # ReplayDevice, ReplayAnalyzer, load_fixture
+│   └── test_crawl_replay.py    # All integration tests (synthetic + fixture)
+└── unit/
+    ├── test_analyzer.py
+    ├── test_crawler.py
+    ├── test_device.py
+    ├── test_hasher.py
+    └── test_reporter.py
+```
+
+### The `CrawlRecorder` (`src/nativeappspider/recorder.py`)
+
+An opt-in recorder that hooks into the crawl loop when `--record` is passed. At each iteration it captures:
+
+- Screenshot path and screen ID (perceptual hash)
+- Whether the screen was new or a revisit
+- Clickable elements (serialised `UIElement` data)
+- `ScreenAnalysis` from Claude (for new screens)
+- `NavigationAction` chosen
+
+Writes `recording.json` to the crawl output directory. This file is the source of truth for fixture extraction — it captures the exact sequence of events as they happened, unlike `screens.json`/`transitions.json` which only store the final state.
+
 ## Future Directions
 
 These are not planned — just areas where the PoC could grow:
