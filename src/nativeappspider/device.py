@@ -218,6 +218,10 @@ class Device:
         result = self._run("shell", "pm", "list", "packages", package)
         return f"package:{package}" in result.stdout
 
+    def force_stop(self, package: str) -> None:
+        """Force-stop an app, killing its process and clearing its task stack."""
+        self._run("shell", "am", "force-stop", package)
+
     def launch_app(self, package: str) -> None:
         """Launch an app by package name.
 

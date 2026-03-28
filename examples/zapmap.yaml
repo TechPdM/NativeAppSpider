@@ -2,16 +2,17 @@
 package: com.zapmap.zapmap
 max_screens: 10
 max_actions: 60
-fresh: true
+fresh: false
 focus: side navigation menu
 scroll_discovery: false
 avoid:
   - registration
   - login
+  - splash
+  - welcome
+  - consent
 dismiss:
   - consent
   - privacy
   - cookie
   - onboarding
-  - splash
-  - welcome

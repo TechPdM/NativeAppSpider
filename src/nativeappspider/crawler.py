@@ -35,6 +35,14 @@ DIALOG_DISMISS_LABELS = frozenset({
     "only this time", "don't allow", "don\u2019t allow",
 })
 
+# Labels that indicate a positive/accept dismiss action on app-level dialogs
+# (consent banners, cookie popups, etc.). Matched as substrings, case-insensitive.
+APP_DISMISS_LABELS = (
+    "consent", "accept", "agree", "ok", "got it", "continue",
+    "close", "dismiss", "skip", "not now", "no thanks", "later",
+    "allow", "confirm",
+)
+
 # Package prefixes and resource ID patterns that indicate ad elements.
 # These regions are masked before hashing so rotating ads don't make the
 # same screen look like a new one.
@@ -58,6 +66,22 @@ AD_RESOURCE_ID_PATTERNS = (
     "native_ad", "nativead", "ad_frame", "adframe",
     "google_ads", "admob",
 )
+
+# Android widget class names that represent text input fields.
+# These are excluded from navigation decisions (the crawler shouldn't
+# tap into form fields) but still documented in screen analysis.
+# How many times a screen can trigger a relaunch before it's marked toxic
+TOXIC_RELAUNCH_THRESHOLD = 2
+
+TEXT_INPUT_CLASSES = frozenset({
+    "android.widget.EditText",
+    "android.widget.AutoCompleteTextView",
+    "android.widget.MultiAutoCompleteTextView",
+    "android.inputmethodservice.ExtractEditText",
+    "androidx.appcompat.widget.AppCompatEditText",
+    "androidx.appcompat.widget.AppCompatAutoCompleteTextView",
+    "com.google.android.material.textfield.TextInputEditText",
+})
 
 
 @dataclass
@@ -103,15 +127,27 @@ class CrawlState:
     # Track actions tried per screen to avoid repeating them
     screen_actions: dict[str, list[str]] = field(default_factory=dict)
     focus_reached: bool = False
+    focus_screen_id: str | None = None  # screen_id of the focus target once found
     # Track which specific elements have been tapped per screen, using
     # (bounds, label) tuples as structural identifiers. This enables precise
     # "all elements explored" detection without relying on Claude.
     screen_tapped_elements: dict[str, set[tuple]] = field(default_factory=dict)
+    # Screens that have caused the app to leave (triggering relaunches).
+    # Once a screen hits the threshold it's treated as toxic and auto-skipped.
+    toxic_screen_counts: dict[str, int] = field(default_factory=dict)
 
     def find_matching_screen(self, hash_val: str, threshold: int = 12) -> str | None:
         """Find an existing screen that matches the given hash."""
         for sid in self.screens:
             if are_similar(sid, hash_val, threshold):
+                return sid
+        return None
+
+    def find_screen_by_name(self, name: str) -> str | None:
+        """Find an existing screen with the same name (case-insensitive)."""
+        name_lower = name.lower()
+        for sid, node in self.screens.items():
+            if node.screen_name.lower() == name_lower:
                 return sid
         return None
 
@@ -135,6 +171,10 @@ class Crawler:
         self.state.output_dir = Path(self.config.output_dir) / f"{self.config.package}_{timestamp}"
         self.state.output_dir.mkdir(parents=True, exist_ok=True)
         (self.state.output_dir / "screenshots").mkdir(exist_ok=True)
+
+        # Force-stop first to reset the task stack, ensuring we start
+        # from the main activity regardless of where the app was left
+        self.device.force_stop(self.config.package)
 
         # Launch the app
         print(f"Launching {self.config.package}...")
@@ -175,6 +215,19 @@ class Crawler:
                 self.state.action_count += 1
                 continue
 
+            # Auto-skip screens that have repeatedly caused the app to leave.
+            # Press back immediately to avoid wasting actions on dead ends.
+            if (
+                not is_new
+                and self.state.toxic_screen_counts.get(screen_id, 0) >= TOXIC_RELAUNCH_THRESHOLD
+            ):
+                name = self.state.screens[screen_id].screen_name
+                print(f"  [toxic] Skipping '{name}' (causes relaunches)")
+                self.device.press_back()
+                self.state.action_count += 1
+                time.sleep(self.config.settle_delay)
+                continue
+
             # Fetch clickable elements once per iteration — reused by both the
             # screen analyzer (to document elements) and the action decider
             clickable = self.device.get_clickable_elements()
@@ -183,30 +236,53 @@ class Crawler:
                 consecutive_known = 0
                 try:
                     # Send the screenshot to Claude for analysis and documentation
-                    recorded = self._process_new_screen(screenshot, screen_id, clickable)
+                    result = self._process_new_screen(screenshot, screen_id, clickable)
                 except Exception as e:
                     # If Claude fails (network, parsing, etc.), still record the
                     # screen so we don't keep trying to analyze it on revisits
                     logger.error("Failed to analyze screen: %s", e)
                     self._record_minimal_screen(screenshot, screen_id)
-                    recorded = True
+                    result = True
 
                 # If the screen was avoided, press back and skip to next iteration
-                if not recorded:
+                if result is False:
                     self.device.press_back()
                     self.state.action_count += 1
                     time.sleep(self.config.settle_delay)
                     continue
 
-                # Scroll through any scrollable containers to discover
-                # off-screen elements that aren't visible in the initial viewport
-                if self.config.scroll_discovery:
-                    clickable = self._discover_scrollable_elements(screen_id, clickable)
+                # Name-based dedup: result is the existing screen_id string.
+                # Switch to it so the rest of the loop treats this as a revisit.
+                if isinstance(result, str):
+                    screen_id = result
+                    consecutive_known += 1
+                    # Fall through to action selection with the canonical screen_id
+                else:
+                    # If this new screen matches a dismiss flow, auto-dismiss it
+                    # right away instead of exploring it further
+                    if self._is_dismiss_screen(screen_id):
+                        if self._auto_dismiss_app_dialog(clickable):
+                            self.state.action_count += 1
+                            time.sleep(self.config.settle_delay)
+                            continue
+
+                    # Scroll through any scrollable containers to discover
+                    # off-screen elements that aren't visible in the initial viewport
+                    if self.config.scroll_discovery:
+                        clickable = self._discover_scrollable_elements(screen_id, clickable)
             else:
                 self.state.screens[screen_id].visit_count += 1
                 consecutive_known += 1
                 print(f"  [revisit] {self.state.screens[screen_id].screen_name} "
                       f"(visited {self.state.screens[screen_id].visit_count}x)")
+
+                # If this is a dismiss-flow screen, try to auto-dismiss it
+                # instead of falling through to normal action selection
+                if self._is_dismiss_screen(screen_id):
+                    if self._auto_dismiss_app_dialog(clickable):
+                        self.state.action_count += 1
+                        time.sleep(self.config.settle_delay)
+                        continue
 
             # Record the state transition as an edge in the graph. We only
             # record it when the screen actually changed (i.e. the action navigated
@@ -221,6 +297,15 @@ class Crawler:
             # Check if we've left the target app (e.g. tapped a deep link or ad
             # that opened a browser). If so, try to get back into the target app.
             if self._is_outside_target_app():
+                # Blame the screen we were on — it caused us to leave the app
+                if screen_id in self.state.screens:
+                    self.state.toxic_screen_counts[screen_id] = (
+                        self.state.toxic_screen_counts.get(screen_id, 0) + 1
+                    )
+                    count = self.state.toxic_screen_counts[screen_id]
+                    if count == TOXIC_RELAUNCH_THRESHOLD:
+                        name = self.state.screens[screen_id].screen_name
+                        print(f"  [toxic] '{name}' caused {count} relaunches, will auto-skip in future")
                 consecutive_relaunches += 1
                 if consecutive_relaunches > max_relaunches:
                     # Re-launching keeps landing outside the app — try pressing
@@ -259,9 +344,14 @@ class Crawler:
             if screen_id not in self.state.current_path:
                 self.state.current_path.append(screen_id)
 
-            # Decide what to do next
+            # Decide what to do next — exclude text input fields so the
+            # crawler doesn't waste actions tapping into form fields
+            navigable = [
+                e for e in clickable
+                if e.class_name not in TEXT_INPUT_CLASSES
+            ]
             action = self._decide_action(
-                screenshot, screen_id, consecutive_known, clickable,
+                screenshot, screen_id, consecutive_known, navigable,
             )
 
             # Execute the action
@@ -462,13 +552,68 @@ class Crawler:
                 return True
         return False
 
+    def _is_dismiss_screen(self, screen_id: str) -> bool:
+        """Check if a recorded screen matches any dismiss flow keywords."""
+        if not self.config.dismiss_flows:
+            return False
+        node = self.state.screens.get(screen_id)
+        if not node:
+            return False
+        name_lower = node.screen_name.lower()
+        desc_lower = node.description.lower()
+        for flow in self.config.dismiss_flows:
+            flow_lower = flow.lower()
+            if flow_lower in name_lower or flow_lower in desc_lower:
+                return True
+        return False
+
+    def _auto_dismiss_app_dialog(self, clickable: list) -> bool:
+        """Try to dismiss an app-level dialog by tapping a dismiss button.
+
+        Scans clickable elements for labels that look like dismiss/accept
+        buttons (e.g. "Consent", "Close", "OK"). Also looks for small
+        close/X buttons in the top-right quadrant of the screen.
+
+        Returns True if a dismiss action was taken.
+        """
+        # First pass: look for labeled dismiss buttons
+        for e in clickable:
+            label = e.label.lower() if e.label else ""
+            if not label:
+                continue
+            for dismiss_label in APP_DISMISS_LABELS:
+                if dismiss_label in label:
+                    cx, cy = e.center
+                    print(f"  [dismiss] Tapping '{e.label}' to dismiss dialog")
+                    self.device.tap(cx, cy)
+                    return True
+
+        # Second pass: look for a small close/X button in the top-right
+        # (common pattern for dialog overlays)
+        w = self._screen_w
+        for e in clickable:
+            cx, cy = e.center
+            x1, y1, x2, y2 = e.bounds
+            button_w = x2 - x1
+            button_h = y2 - y1
+            # Small button (< 150px) in the right half, top third of screen
+            if (button_w < 150 and button_h < 150
+                    and cx > w * 0.6 and cy < self._screen_h * 0.33):
+                label = e.label or "X"
+                print(f"  [dismiss] Tapping close button '{label}' at ({cx},{cy})")
+                self.device.tap(cx, cy)
+                return True
+
+        return False
+
     def _process_new_screen(
         self, screenshot: Image.Image, screen_id: str, clickable: list,
-    ) -> bool:
+    ) -> bool | str:
         """Analyze and record a new screen.
 
         Returns True if the screen was recorded, False if it was skipped
-        because it matches an avoided flow.
+        because it matches an avoided flow, or the existing screen_id string
+        if this screen was deduplicated against an existing screen by name.
         """
         ui_elements = [
             {"label": e.label, "bounds": e.bounds, "class": e.class_name}
@@ -496,6 +641,17 @@ class Crawler:
             print(f"  [avoid] Skipping screen: {analysis.screen_name}")
             return False
 
+        # Name-based deduplication: if Claude gave this screen the same name
+        # as an existing screen, treat it as a revisit (e.g. form fields in
+        # different focus states producing different hashes but same screen)
+        existing_sid = self.state.find_screen_by_name(analysis.screen_name)
+        if existing_sid:
+            existing = self.state.screens[existing_sid]
+            existing.visit_count += 1
+            print(f"  [dedup] '{analysis.screen_name}' matches existing screen, "
+                  f"treating as revisit (visited {existing.visit_count}x)")
+            return existing_sid
+
         # Check if this screen matches the focus target
         if (
             self.config.focus_screen
@@ -503,6 +659,7 @@ class Crawler:
             and analysis.matches_focus_target
         ):
             self.state.focus_reached = True
+            self.state.focus_screen_id = screen_id
             print(f"  [focus] Reached target screen: {analysis.screen_name}")
 
         self._record_screen(screenshot, screen_id, analysis)
@@ -567,6 +724,27 @@ class Crawler:
         clickable_keys = {(e.bounds, e.label) for e in clickable}
         if clickable_keys and not (clickable_keys - tapped):
             return NavigationAction(action="back", reason="all elements explored")
+
+        # Breadth-first from focus screen: when we're back on the focus
+        # target, pick the next untried element directly instead of asking
+        # Claude (which tends to re-explore the same deep path).
+        if (
+            self.state.focus_screen_id
+            and screen_id == self.state.focus_screen_id
+            and tapped  # only after first visit (tapped is non-empty)
+        ):
+            untried = [
+                e for e in clickable
+                if (e.bounds, e.label) not in tapped
+            ]
+            if untried:
+                pick = untried[0]
+                cx, cy = pick.center
+                label = pick.label or "element"
+                return NavigationAction(
+                    action="tap", x=cx, y=cy,
+                    reason=f"breadth-first: trying untried '{label}' on focus screen",
+                )
 
         try:
             elements_for_ai = [

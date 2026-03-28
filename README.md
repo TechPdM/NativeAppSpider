@@ -101,11 +101,17 @@ nativeappspider crawl com.example.app --fresh
 # Skip specific flows (e.g. avoid registration/login during exploration)
 nativeappspider crawl com.example.app --avoid registration --avoid login --avoid "sign up"
 
+# Auto-dismiss dialogs (consent banners, cookie popups, onboarding overlays)
+nativeappspider crawl com.example.app --dismiss consent --dismiss cookie --dismiss onboarding
+
 # Navigate to a specific screen first, then explore from there
 nativeappspider crawl com.example.app --focus map
 
-# Combine focus and avoid for targeted crawling
-nativeappspider crawl com.example.app --focus settings --avoid login --avoid registration
+# Combine focus, avoid, and dismiss for targeted crawling
+nativeappspider crawl com.example.app --focus settings --avoid login --dismiss consent
+
+# Use a YAML config file instead of CLI flags
+nativeappspider crawl --config examples/zapmap.yaml
 
 # Verbose logging
 nativeappspider -v crawl com.example.app
@@ -113,6 +119,41 @@ nativeappspider -v crawl com.example.app
 # Regenerate report from previous crawl data
 nativeappspider report output/com.example.app_20240101_120000/
 ```
+
+### Config Files
+
+Instead of passing many CLI flags, use a YAML config file:
+
+```yaml
+# examples/myapp.yaml
+package: com.example.app
+max_screens: 10
+max_actions: 60
+fresh: true
+focus: settings menu
+scroll_discovery: false
+avoid:
+  - registration
+  - login
+dismiss:
+  - consent
+  - privacy
+  - cookie
+```
+
+Run with: `nativeappspider crawl --config examples/myapp.yaml`
+
+## Smart Crawl Behaviours
+
+The crawler includes several heuristics to improve efficiency and avoid getting stuck:
+
+- **Force-stop before launch** — the app is force-stopped before each crawl so it always starts from its main activity, even without `--fresh`. App data is preserved.
+- **Breadth-first from focus screen** — after reaching the `--focus` target, the crawler systematically tries each untried element on that screen before going deep into any one path.
+- **Screen name deduplication** — if Claude identifies a screen with the same name as one already recorded (e.g. a form with different fields focused), it's treated as a revisit instead of consuming a new screen slot.
+- **Text field filtering** — text input fields (EditText, TextInputEditText, etc.) are excluded from navigation decisions. They're still documented in the screen analysis, but the crawler won't waste actions tapping into form fields.
+- **Toxic screen detection** — screens that repeatedly cause the app to leave (e.g. photo pickers that open a system activity) are automatically skipped after 2 relaunches.
+- **Auto-dismiss app dialogs** — screens matching `--dismiss` keywords are dismissed automatically by tapping accept/close buttons, preventing the crawler from getting stuck on consent banners or cookie popups that don't respond to the back button.
+- **Ad region masking** — known ad SDK elements are masked in screenshots before perceptual hashing, so rotating ads don't cause the same screen to be treated as new.
 
 ## Output
 
@@ -130,12 +171,12 @@ output/com.example.app_20240101_120000/
 ## Development
 
 ```bash
-# Install with dev dependencies
-pip install -e ".[dev]"
+# Install dependencies
+uv sync
 
 # Run tests (71 unit tests, ~2s, no device needed)
-pytest tests/unit/ -v
+uv run pytest tests/unit/ -v
 
 # Lint
-ruff check src/
+uv run ruff check src/
 ```
