@@ -195,9 +195,12 @@ def load_checkpoint(crawl_dir: Path) -> tuple[CrawlState, CrawlConfig]:
             )
 
     # Load runtime state from checkpoint
-    checkpoint_path = crawl_dir / "crawl_state.json"
-    if checkpoint_path.exists():
-        cp = json.loads(checkpoint_path.read_text())
+    try:
+        cp = json.loads((crawl_dir / "crawl_state.json").read_text())
+    except FileNotFoundError:
+        cp = {}
+
+    if cp:
         state.action_count = cp.get("action_count", 0)
         state.screen_actions = cp.get("screen_actions", {})
         state.focus_reached = cp.get("focus_reached", False)
@@ -210,9 +213,7 @@ def load_checkpoint(crawl_dir: Path) -> tuple[CrawlState, CrawlConfig]:
                 (tuple(e[0]), e[1]) for e in elements
             }
 
-        config_data = cp.get("config", {})
-    else:
-        config_data = {}
+    config_data = cp.get("config", {})
 
     config = CrawlConfig(
         package=config_data.get("package", ""),
@@ -241,17 +242,11 @@ class Crawler:
                  record: bool = False, resume_state: CrawlState | None = None):
         self.config = config
         self.device = device or Device()
-        if model:
-            self.analyzer = Analyzer(model=model)
-        elif analysis_model or decision_model:
-            kwargs = {}
-            if analysis_model:
-                kwargs["analysis_model"] = analysis_model
-            if decision_model:
-                kwargs["decision_model"] = decision_model
-            self.analyzer = Analyzer(**kwargs)
-        else:
-            self.analyzer = Analyzer()
+        self.analyzer = Analyzer(
+            model=model,
+            analysis_model=analysis_model,
+            decision_model=decision_model,
+        )
         self.state = resume_state or CrawlState()
         self._record = record
         self._recorder: CrawlRecorder | None = None

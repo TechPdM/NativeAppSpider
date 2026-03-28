@@ -76,7 +76,7 @@ def main(verbose: bool) -> None:
 @click.option("--delay", default=1.5, type=float, help="Seconds to wait after each action")
 @click.option("--model", default=None, help="Claude model for both analysis and decisions (shorthand)")
 @click.option("--analysis-model", default=None, help="Claude model for screen analysis (default: claude-sonnet-4-6)")
-@click.option("--decision-model", default=None, help="Claude model for navigation decisions (default: claude-haiku-4-5)")
+@click.option("--decision-model", default=None, help="Claude model for navigation decisions (default: claude-sonnet-4-6)")
 @click.option("--fresh", is_flag=True, help="Clear app data before crawling (starts from initial screen)")
 @click.option("--avoid", multiple=True, help="Flows to avoid, e.g. --avoid registration --avoid login")
 @click.option("--dismiss", multiple=True, help="Screens to dismiss quickly, e.g. --dismiss consent --dismiss privacy")
