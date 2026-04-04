@@ -109,7 +109,7 @@ Test the full crawl pipeline end-to-end without a real device or API key. Record
 
 **`--focus` flag:**
 - [x] Navigate to a named screen first, then explore from there — two-phase crawl with fuzzy screen name matching
-- Current limitation: detection uses `focus_screen.lower() in screen_name.lower()`, which depends on Claude including the focus keyword in the screen name. This can fail if Claude names the screen differently (e.g. `--focus map` won't match "Charging Station Locator" or "Main Dashboard"). Improvement: add a `matches_focus_target: bool` field to the `analyze_screen` JSON response so Claude makes a semantic judgment about whether the screen matches the focus target, rather than relying on substring matching of the name it chose.
+- ~~Current limitation: detection uses `focus_screen.lower() in screen_name.lower()`, which depends on Claude including the focus keyword in the screen name.~~ Resolved: `matches_focus_target: bool` field added to `ScreenAnalysis` so Claude makes a semantic judgment about whether the screen matches the focus target.
 
 **Smart content wait:**
 - [ ] After each action, compare consecutive screenshots — keep waiting until the screen stabilises (hash stops changing). Handles network-dependent screens that take variable time to load. Falls back to max wait timeout.

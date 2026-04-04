@@ -44,13 +44,18 @@ Wraps Android Debug Bridge (ADB) commands into a Python interface. All device in
 
 | Method | What it does | ADB command |
 |---|---|---|
+| `is_connected()` | Checks if a device is reachable | `adb devices` |
+| `get_screen_size()` | Returns (width, height), prefers override | `adb shell wm size` |
 | `screenshot()` | Captures screen as PIL Image | `adb exec-out screencap -p` |
 | `tap(x, y)` | Taps at pixel coordinates | `adb shell input tap` |
 | `swipe(x1, y1, x2, y2)` | Swipes between two points | `adb shell input swipe` |
 | `press_back()` | Android back button | `adb shell input keyevent 4` |
 | `press_home()` | Android home button | `adb shell input keyevent 3` |
 | `input_text(text)` | Types text into focused field | `adb shell input text` |
-| `launch_app(package)` | Launches app by package name | `adb shell monkey -p ...` |
+| `launch_app(package)` | Launches app by package name | `adb shell am start` (monkey fallback) |
+| `force_stop(package)` | Kill app and clear task stack | `adb shell am force-stop` |
+| `clear_app_data(package)` | Wipe app data (fresh install) | `adb shell pm clear` |
+| `is_package_installed(package)` | Check if app is installed | `adb shell pm list packages` |
 | `current_activity()` | Gets foreground activity name | `adb shell dumpsys activity` |
 | `get_ui_hierarchy()` | Dumps UI tree as `UIElement` list | `adb shell uiautomator dump` |
 | `get_clickable_elements()` | Filters hierarchy to clickable elements | (filters `get_ui_hierarchy()`) |
@@ -89,7 +94,12 @@ The prompt includes context about already-visited screens so the AI can prioriti
 
 **2. Navigation Decision (`decide_next_action`)**
 
-Given the current screenshot, clickable elements, and visited screen names, returns a single `NavigationAction` — the best next step to maximize exploration coverage. Falls back to "back" if the screen appears fully explored.
+Given the current screenshot, clickable elements, and visited screen names, returns a single `NavigationAction` — the best next step to maximize exploration coverage. Falls back to "back" if the screen appears fully explored. Accepts additional context: `avoid_flows`, `dismiss_flows`, `focus_screen`, `recent_actions` (per-screen action history to prevent repeat taps), and `target_package` (to keep the crawler inside the app).
+
+**Key data classes:**
+
+- `ScreenAnalysis` — `screen_name`, `description`, `elements`, `suggested_actions`, `matches_focus_target` (semantic judgment of whether the screen matches a `--focus` target)
+- `NavigationAction` — `action` (tap/swipe_up/swipe_down/back/type), `x`, `y`, `text`, `reason`
 
 **Model:** Defaults to `claude-sonnet-4-6` for both calls. Analysis and navigation can use different models via `--analysis-model` and `--decision-model` to trade quality for cost. Each crawl step makes 1-2 API calls (analyze + decide), so a 50-screen crawl is roughly 100 API calls.
 
@@ -99,8 +109,8 @@ The central loop that ties everything together. Manages the state graph and driv
 
 **Key classes:**
 
-- `CrawlConfig` — all tunable parameters (max screens, max depth, max actions, settle delay, hash threshold)
-- `CrawlState` — runtime state: the NetworkX directed graph, screen registry, action counter, current navigation path
+- `CrawlConfig` — all tunable parameters (max screens, max depth, max actions, settle delay, hash threshold, avoid/dismiss/focus flows, scroll discovery)
+- `CrawlState` — runtime state: the NetworkX directed graph, screen registry, action counter, current navigation path, per-screen action history (`screen_actions`), per-element tap tracking (`screen_tapped_elements`), toxic screen counts, focus state
 - `ScreenNode` — a discovered screen with its analysis, activity name, screenshot path, and visit count
 - `Crawler` — the orchestrator
 
@@ -119,7 +129,7 @@ while under limits:
         save screenshot
         add node to graph
 
-    if stuck in loop (>5 consecutive revisits):
+    if stuck in loop (>10 consecutive revisits):
         press back
     elif at max depth:
         press back
@@ -137,10 +147,28 @@ save results
 **Termination conditions:**
 - `max_actions` reached (default 200)
 - `max_screens` discovered (default 50)
+- Max consecutive screenshot failures (10) — breaks cleanly if the device becomes unresponsive
 
-**Loop detection:** If the crawler visits already-known screens 5+ times in a row, it forces a back navigation to escape cycles (e.g., tapping a button that opens a dialog that immediately closes).
+**Loop detection (two levels):**
+
+1. **Per-element tracking** — each tap is recorded as a `(bounds, label)` tuple in `screen_tapped_elements`. When all clickable elements on a screen have been tapped, the crawler forces a back navigation without making an API call. On `--focus` screens, this enables breadth-first exploration: untried elements are picked before asking Claude.
+2. **Consecutive revisit safety net** — if the crawler visits already-known screens 10+ times in a row, it forces a back navigation to escape cycles (e.g., tapping a button that opens a dialog that immediately closes).
 
 **Backtracking:** The crawler maintains a `current_path` stack. When it presses back, it pops the stack. This gives it a depth-first flavor within the broader exploration — it goes deep, backtracks, then tries alternate branches.
+
+**Toxic screen detection:** Screens that repeatedly cause the app to leave (triggering relaunches) are tracked in `toxic_screen_counts`. After a screen triggers 2+ relaunches, it's marked toxic and auto-skipped — the crawler immediately presses back instead of trying to interact with it.
+
+**Name-based deduplication:** When Claude assigns the same name to a visually different screen (e.g., form states, list scroll positions), `find_screen_by_name()` treats them as revisits rather than consuming the screen budget. Final output gets numeric suffixes via `_deduplicate_screen_names()` to keep names unique.
+
+**Ad masking:** Before hashing, `_mask_ad_regions()` detects ad elements by package prefix (AdMob, Facebook Ads, Unity Ads, etc.) and resource ID patterns, then fills those regions with grey. This prevents rotating ad content from making the same screen appear as a new one.
+
+**System dialog handling:** The crawler auto-detects system dialog overlays (permission prompts, "app not responding", etc.) by checking for elements from known system packages (`com.android.permissioncontroller`, `android`, etc.). When detected, it taps a dismiss button or presses back instead of analyzing the dialog as a screen.
+
+**Scroll discovery:** When `scroll_discovery` is enabled (default), the crawler scrolls through scrollable containers to reveal off-screen elements. Stops when no new elements appear or after 5 scrolls per container.
+
+**App escape recovery:** Each step checks `current_activity()` against the target package. If the crawler has escaped the app (e.g., tapped a link that opened a browser), it force-stops and relaunches. A max relaunch limit prevents infinite loops.
+
+**Checkpoint saves:** After every iteration, the crawler writes `crawl_state.json` to the output directory (atomic write via tmp+rename). This enables crash-resilient `--continue` resumption.
 
 ### `reporter.py` — Output Generation
 
@@ -162,6 +190,39 @@ nativeappspider report <crawl-dir>          # Regenerate report from saved data
 ```
 
 The `crawl` command auto-generates a report after the crawl completes.
+
+**Crawl options:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config <file>` | — | YAML config file (CLI args override file values) |
+| `--max-screens` | 50 | Maximum unique screens to discover |
+| `--max-actions` | 200 | Maximum actions to take |
+| `--max-depth` | 10 | Max navigation depth before backtracking |
+| `--output` | `output` | Output directory |
+| `--serial` | — | ADB device serial (multi-device setups) |
+| `--delay` | 1.5 | Seconds to wait after each action |
+| `--model` | `claude-sonnet-4-6` | Model for both analysis and decisions |
+| `--analysis-model` | — | Model for screen analysis only |
+| `--decision-model` | — | Model for navigation decisions only |
+| `--fresh` | off | Clear app data before crawling |
+| `--avoid <flow>` | — | Skip matching screens (repeatable) |
+| `--dismiss <screen>` | — | Auto-dismiss matching screens (repeatable) |
+| `--focus <screen>` | — | Navigate to this screen first, then explore |
+| `--scroll-discovery` | on | Scroll containers to find off-screen elements |
+| `--record` | off | Capture crawl steps for replay test fixtures |
+| `--continue <dir>` | — | Resume a previous crawl from its output dir |
+
+**YAML config files** (`--config`) accept the same keys as CLI flags (snake_case). CLI arguments override config file values. Example:
+
+```yaml
+package: com.example.app
+max_screens: 30
+delay: 2.0
+avoid: [login, registration]
+dismiss: [consent, privacy]
+focus: settings
+```
 
 ## Data Flow
 
@@ -195,6 +256,8 @@ output/<package>_<timestamp>/
 ├── screens.json          # All screen data (name, description, elements, activity)
 ├── transitions.json      # Edge list [{from, to, action, reason}]
 ├── flow.mmd              # Mermaid diagram source
+├── crawl_state.json      # Checkpoint for --continue resumption (atomic writes)
+├── recording.json        # (only with --record) Step-by-step crawl recording
 └── report.html           # Self-contained visual report
 ```
 
@@ -278,17 +341,26 @@ nativeappspider crawl com.example.app --decision-model claude-haiku-4-5
 
 # Budget: haiku for everything
 nativeappspider crawl com.example.app --model claude-haiku-4-5
+
+# Focus on a specific screen, avoid auth flows
+nativeappspider crawl com.example.app --focus settings --avoid login
+
+# Resume a previous crawl with higher budget
+nativeappspider crawl --continue output/com.example.app_20240101_120000 --max-actions 400
+
+# Use a YAML config file
+nativeappspider crawl --config myapp.yaml
 ```
 
 ## Testing Architecture
 
 Three tiers of tests, each with different trade-offs:
 
-### Unit Tests (`tests/unit/`)
+### Unit Tests (`tests/unit/`) — 71 tests
 
 Fast, fully mocked, no device or API key needed. Each module has its own test file. Subprocess calls, HTTP requests, and file I/O are all mocked. Run constantly during development (~1s).
 
-### Replay Integration Tests (`tests/integration/`)
+### Replay Integration Tests (`tests/integration/`) — 35 tests
 
 Run the real `Crawler` code end-to-end but with scripted device and analyzer responses. Two mock classes in `tests/integration/replay.py` make this possible:
 
@@ -296,6 +368,8 @@ Run the real `Crawler` code end-to-end but with scripted device and analyzer res
 - **`ReplayAnalyzer`** — serves a pre-defined sequence of `AnalyzerStep`s (screen analysis, navigation action). No API calls.
 
 Each test scenario defines a list of steps, wires up the mocks, runs `crawler.crawl()`, and asserts on the resulting state graph, output files, and action history. This covers the full pipeline — hashing, graph building, loop detection, backtracking, dedup — without external dependencies.
+
+**Total: 106 tests** (71 unit + 35 integration), all passing in ~2s.
 
 ### Fixture-Based Replay Tests (`tests/fixtures/`)
 
@@ -347,4 +421,4 @@ These are not planned — just areas where the PoC could grow:
 - **Diff mode** to compare two crawls of the same app (before/after a release)
 - **Flow replay** to re-execute a recorded path for regression testing
 - **Parallel exploration** with multiple emulator instances
-- **Cost optimization** with a cheaper model for navigation and Claude for analysis only
+- **Smart content wait** — compare consecutive screenshots to detect when a screen has finished loading, instead of relying on a fixed delay
